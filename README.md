@@ -23,7 +23,7 @@ bash <(curl -Ls is.gd/你的自定义后缀)
 直接将脚本下载为系统全局命令并赋予权限，随后瞬间唤醒面板（适合未安装 curl 的极简系统）：
 
 ```bash
-wget -O /usr/local/bin/nm https://raw.githubusercontent.com/lijboys/NAT-MTP-Script/main/nm.sh && chmod +x /usr/local/bin/nm && nm
+wget -O /usr/local/bin/nm https://raw.githubusercontent.com/lijboys/NAT-MTP/refs/heads/main/nm.sh && chmod +x /usr/local/bin/nm && nm
 ```
 
 ### 方案 D：经典拉取执行
@@ -31,7 +31,7 @@ wget -O /usr/local/bin/nm https://raw.githubusercontent.com/lijboys/NAT-MTP-Scri
 传统的 GitHub Raw 裸脚本部署方法：
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/lijboys/NAT-MTP-Script/main/nm.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/lijboys/NAT-MTP/refs/heads/main/nm.sh)
 ```
 
 -----
