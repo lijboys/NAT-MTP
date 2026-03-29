@@ -233,7 +233,7 @@ while true; do
         4) if command -v systemctl >/dev/null 2>&1; then systemctl start mtg; else nohup /usr/local/bin/mtg run /etc/mtg.toml > /var/log/mtg.log 2>&1 & fi; echo -e "${GREEN}已启动！${RESET}"; sleep 1 ;;
         5) if command -v systemctl >/dev/null 2>&1; then systemctl stop mtg; else pkill -f "mtg run"; fi; echo -e "${RED}已停止！${RESET}"; sleep 1 ;;
         6) uninstall_mtp ;; 7) update_script ;; 0) clear; exit 0 ;;
-        00) if [ -f "/usr/local/bin/nat" ]; then /usr/local/bin/nat; else echo -e "${RED}未安装主控！${RESET}"; sleep 1; fi ;;
+        00) if [ -f "/usr/local/bin/nat" ]; then /usr/local/bin/n; else echo -e "${RED}未安装主控！${RESET}"; sleep 1; fi ;;
         *) echo -e "${RED}输入错误！${RESET}"; sleep 1 ;;
     esac
 done
