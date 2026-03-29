@@ -2,7 +2,7 @@
 
 <div align="center">
   
-[🦇 MTP 代理搭建教程](./MTP.md) | [📊 Komari 探针部署教程](./komari.md)
+[🦇 MTP 代理搭建教程](./MD/MTP.md) | [📊 Komari 探针部署教程](./MD/komari.md)
 
 </div>
 
