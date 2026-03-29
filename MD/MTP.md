@@ -1,6 +1,6 @@
 # 🦇 NatTools - MTP 代理部署教程
 
-[⬅️ 返回 NooMili 工具箱主页](./README.md)
+[⬅️ 返回 NooMili 工具箱主页](../README.md)
 
 ## 🌟 简介
 
