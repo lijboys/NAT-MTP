@@ -6,14 +6,14 @@ YELLOW="\033[33m"
 CYAN="\033[36m"
 RESET="\033[0m"
 
-# 你的 GitHub Raw 链接
-NAT_URL="https://raw.githubusercontent.com/lijboys/NatTools/main/nat.sh"
+# 你的 GitHub Raw 链接 (已更新为 NooMili.sh)
+NAT_URL="https://raw.githubusercontent.com/lijboys/NatTools/main/NooMili.sh"
 MTP_URL="https://raw.githubusercontent.com/lijboys/NatTools/main/mtp.sh"
 KOMARI_URL="https://raw.githubusercontent.com/lijboys/NatTools/main/komari.sh"
 
 if [ "$EUID" -ne 0 ]; then echo -e "${RED}请使用 root 用户运行！${RESET}"; exit 1; fi
 
-# 清理旧的 nat 快捷键
+# 清理旧的 nat 快捷键 (兼容你之前的版本)
 if [ -f "/usr/local/bin/nat" ]; then rm -f /usr/local/bin/nat; fi
 
 # 安装主控快捷键 n
