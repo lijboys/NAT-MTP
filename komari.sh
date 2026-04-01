@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # =========================================================
-#  NatTools - Komari 专用运维脚本 (lijboys 版)
-#  GitHub: https://github.com/lijboys/NatTools
+#  SSHTools - Komari 专用运维脚本 (lijboys 版)
+#  GitHub: https://github.com/lijboys/SSHTools
 # =========================================================
 
 RED='\033[0;31m'
@@ -15,7 +15,7 @@ if [ "$EUID" -ne 0 ]; then echo -e "${RED}Error: Please run as root!${PLAIN}"; e
 
 # ================= 自动创建快捷键 =================
 if [ ! -f "/usr/local/bin/komari" ]; then
-    curl -fsSL "https://raw.githubusercontent.com/lijboys/NatTools/main/komari.sh" -o /usr/local/bin/komari 2>/dev/null || cp -f "$0" /usr/local/bin/komari
+    curl -fsSL "https://raw.githubusercontent.com/lijboys/SSHTools/main/komari.sh" -o /usr/local/bin/komari 2>/dev/null || cp -f "$0" /usr/local/bin/komari
     chmod +x /usr/local/bin/komari
 fi
 # ==================================================
@@ -45,7 +45,7 @@ draw_menu() {
     echo -e "  ${GREEN}5.${PLAIN} 添加域名访问 (含SSL/CF回源)   ${RED}6.${PLAIN} 删除域名访问"
     echo -e "  ${GREEN}7.${PLAIN} 允许 IP+端口 访问             ${RED}8.${PLAIN} 阻止 IP+端口 访问"
     echo -e "${BLUE}---------------------------------------${PLAIN}"
-    echo -e "  ${YELLOW}00.${PLAIN} 返回主菜单 (NatTools)       ${GREEN}0.${PLAIN} 退出脚本"
+    echo -e "  ${YELLOW}00.${PLAIN} 返回主菜单 (SSHTools)       ${GREEN}0.${PLAIN} 退出脚本"
     echo -e "${BLUE}=======================================${PLAIN}"
     echo -n " 请输入你的选择: "
 }
