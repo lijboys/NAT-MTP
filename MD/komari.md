@@ -1,4 +1,4 @@
-# 📊 NatTools - Komari 探针部署教程
+# 📊 SSHTools - Komari 探针部署教程
 
 [⬅️ 返回 NooMili 工具箱主页](../README.md)
 
@@ -20,7 +20,7 @@
 
 *(单脚本独立安装指令：)*
 ```bash
-wget -O /usr/local/bin/komari [https://raw.githubusercontent.com/lijboys/NatTools/main/komari.sh](https://raw.githubusercontent.com/lijboys/NatTools/main/komari.sh) && chmod +x /usr/local/bin/komari && komari
+wget -O /usr/local/bin/komari [https://raw.githubusercontent.com/lijboys/SSHTools/main/komari.sh](https://raw.githubusercontent.com/lijboys/SSHTools/main/komari.sh) && chmod +x /usr/local/bin/komari && komari
 ```
 
 ## 🛠️ 核心功能与玩法
