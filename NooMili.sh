@@ -8,9 +8,9 @@ BLUE="\033[34m"
 RESET="\033[0m"
 
 # 你的 GitHub Raw 链接 (已全面更新为 SSHTools 仓库)
-NAT_URL="https://raw.githubusercontent.com/lijboys/SSHTools/main/SSHTools.sh"
-MTP_URL="https://raw.githubusercontent.com/lijboys/SSHTools/main/mtp.sh"
-KOMARI_URL="https://raw.githubusercontent.com/lijboys/SSHTools/main/komari.sh"
+NAT_URL="https://raw.githubusercontent.com/lijboys/SSHTools/refs/heads/main/NooMili.sh"
+MTP_URL="https://raw.githubusercontent.com/lijboys/SSHTools/refs/heads/main/mtp.sh"
+KOMARI_URL="https://raw.githubusercontent.com/lijboys/SSHTools/refs/heads/main/komari.sh"
 
 if [ "$EUID" -ne 0 ]; then echo -e "${RED}请使用 root 用户运行！${RESET}"; exit 1; fi
 
