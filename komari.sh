@@ -39,24 +39,22 @@ draw_menu() {
     echo -e "快捷指令: ${GREEN}komari${PLAIN}"
     echo -e "官方介绍：https://github.com/komari-monitor/komari"
     echo -e "${BLUE}---------------------------------------${PLAIN}"
-    echo -e "  ${GREEN}1.${PLAIN} 安装                        ${GREEN}2.${PLAIN} 更新"
+    echo -e "  ${GREEN}1.${PLAIN} 安装                        ${GREEN}2.${PLAIN} 更新 (探针程序)"
     echo -e "  ${RED}3.${PLAIN} 卸载                        ${YELLOW}4.${PLAIN} 查看初始凭据"
     echo -e "${BLUE}---------------------------------------${PLAIN}"
     echo -e "  ${GREEN}5.${PLAIN} 添加域名访问 (含SSL/CF回源)   ${RED}6.${PLAIN} 删除域名访问"
     echo -e "  ${GREEN}7.${PLAIN} 允许 IP+端口 访问             ${RED}8.${PLAIN} 阻止 IP+端口 访问"
     echo -e "${BLUE}---------------------------------------${PLAIN}"
+    echo -e "  ${CYAN}88.${PLAIN} 更新探针面板代码 (从 GitHub 同步)"
     echo -e "  ${YELLOW}9.${PLAIN} 返回主菜单 (NooMili)"
     echo -e "  ${GREEN}0.${PLAIN} 退出脚本"
     echo -e "${BLUE}=======================================${PLAIN}"
     echo -n " 请输入你的选择: "
 }
 
-# 1. 安装并自动显示密码
 install_komari() {
     apt update && apt install -y curl wget sed socat nginx-light iptables
     echo -e "${YELLOW}正在拉取官方程序...${PLAIN}"
-    
-    # 修复：先下载脚本，再通过 stdin 传入选择 1，最后清理临时文件
     wget -qO /tmp/komari-install.sh https://raw.githubusercontent.com/komari-monitor/komari/main/install-komari.sh
     chmod +x /tmp/komari-install.sh
     echo "1" | bash /tmp/komari-install.sh
@@ -70,7 +68,6 @@ install_komari() {
     read -p "按回车返回菜单..."
 }
 
-# 5. 添加域名访问 (CF回源优化)
 add_domain() {
     read -p "请输入域名: " domain
     read -p "请输入内网端口 (默认 25774): " port
@@ -91,17 +88,15 @@ server {
     }
 }
 EOF
-        echo -e "${GREEN}CF回源配置完成！请在CF面板开启小黄云并设置 Origin Rule 指向你的 80 或对应映射端口。${PLAIN}"
+        echo -e "${GREEN}CF回源配置完成！请在CF网页版面板开启小黄云，并设置 Origin Rule 指向你的 80 或对应映射端口。${PLAIN}"
     else
         echo -e "${YELLOW}正在配置 SSL...${PLAIN}"
-        # (代码同之前，支持重新申请或修改)
     fi
     ln -sf /etc/nginx/sites-available/${domain} /etc/nginx/sites-enabled/
     systemctl restart nginx
     read -p "处理完成，按回车返回..."
 }
 
-# 7 & 8 防火墙开关
 manage_firewall() {
     local action=$1
     local port=25774
@@ -116,34 +111,45 @@ manage_firewall() {
     read -p "按回车返回..."
 }
 
+update_panel() {
+    clear
+    echo -e "${YELLOW}正在从 GitHub 拉取最新探针面板代码...${PLAIN}"
+    curl -fsSL "https://raw.githubusercontent.com/lijboys/SSHTools/main/komari.sh" -o /usr/local/bin/komari
+    chmod +x /usr/local/bin/komari
+    echo -e "${GREEN}✅ 探针面板更新完成！即将重启面板...${PLAIN}"
+    sleep 2; exec /usr/local/bin/komari
+}
+
 # 脚本入口
 while true; do
     draw_menu
     read choice
     case $choice in
         1) install_komari ;;
-        2) # 修复：更新逻辑同理
+        2) 
+           echo -e "${YELLOW}正在升级官方 Komari 探针核心...${PLAIN}"
            wget -qO /tmp/komari-install.sh https://raw.githubusercontent.com/komari-monitor/komari/main/install-komari.sh
            chmod +x /tmp/komari-install.sh
            echo "2" | bash /tmp/komari-install.sh
            rm -f /tmp/komari-install.sh
-           read -p "按回车返回..."
+           read -p "升级完成，按回车返回..."
            ;;
-        3) # 卸载
+        3) 
            systemctl stop komari && rm -rf /opt/komari
            echo "卸载成功" ; sleep 2 ;;
-        4) # 查看凭据
+        4) 
            journalctl -u komari -n 200 | grep -E "Username:|Password:"
            read -p "回车继续..." ;;
         5) add_domain ;;
-        6) # 删除域名
+        6) 
            ls /etc/nginx/sites-available/
            read -p "输入要删除的域名: " d
            rm -f /etc/nginx/sites-available/$d /etc/nginx/sites-enabled/$d
            systemctl restart nginx ;;
         7) manage_firewall "allow" ;;
         8) manage_firewall "deny" ;;
-        9) # 返回主菜单逻辑
+        88) update_panel ;;
+        9) 
            if [ -f "/usr/local/bin/n" ]; then
                exec /usr/local/bin/n
            else
