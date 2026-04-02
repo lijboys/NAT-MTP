@@ -9,9 +9,13 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
 PLAIN='\033[0m'
 
 if [ "$EUID" -ne 0 ]; then echo -e "${RED}Error: Please run as root!${PLAIN}"; exit 1; fi
+
+# 强行回到主目录，防止因当前执行目录被删除导致的 getcwd 满屏报错
+cd ~
 
 # ================= 自动创建快捷键 =================
 if [ ! -f "/usr/local/bin/komari" ]; then
@@ -19,6 +23,11 @@ if [ ! -f "/usr/local/bin/komari" ]; then
     chmod +x /usr/local/bin/komari
 fi
 # ==================================================
+
+# 缓存公网IP，避免每次刷新菜单都卡顿
+if [ -z "$PUBLIC_IP" ]; then
+    PUBLIC_IP=$(curl -s4m2 ifconfig.me || curl -s4m2 ipinfo.io/ip)
+fi
 
 # 状态检测
 check_install() {
@@ -36,7 +45,21 @@ draw_menu() {
     echo -e "       📊 Komari 探针管理面板"
     echo -e "${BLUE}=======================================${PLAIN}"
     echo -e "当前状态: komari $STATUS"
-    echo -e "快捷指令: ${GREEN}komari${PLAIN}"
+    
+    # 如果已安装，则显示核心访问信息
+    if [ -f "/opt/komari/komari" ]; then
+        echo -e "内网监听端口: ${YELLOW}25774${PLAIN} ${RED}(NAT用户请去商家面板映射此端口!)${PLAIN}"
+        echo -e "直连访问地址: ${CYAN}http://${PUBLIC_IP}:25774${PLAIN} ${YELLOW}(NAT请将 25774 替换为公网端口)${PLAIN}"
+        
+        # 智能提取并展示已绑定的域名
+        if [ -d "/etc/nginx/sites-enabled/" ]; then
+            DOMAINS=$(ls -1 /etc/nginx/sites-enabled/ 2>/dev/null | grep -v "default" | tr '\n' ' ')
+            if [ -n "$DOMAINS" ]; then
+                echo -e "已绑定域名:   ${GREEN}${DOMAINS}${PLAIN}"
+            fi
+        fi
+    fi
+    
     echo -e "官方介绍：https://github.com/komari-monitor/komari"
     echo -e "${BLUE}---------------------------------------${PLAIN}"
     echo -e "  ${GREEN}1.${PLAIN} 安装                        ${GREEN}2.${PLAIN} 更新 (探针程序)"
@@ -52,6 +75,19 @@ draw_menu() {
     echo -n " 请输入你的选择: "
 }
 
+# 提取并高亮显示账号密码
+show_credentials() {
+    LOG_LINE=$(journalctl -u komari -n 200 | grep -E "Username:|Password:" | tail -n 1)
+    if [ -n "$LOG_LINE" ]; then
+        USERNAME=$(echo "$LOG_LINE" | sed -n 's/.*Username: \([^ ,]*\).*/\1/p')
+        PASSWORD=$(echo "$LOG_LINE" | sed -n 's/.*Password: \([^ ]*\).*/\1/p')
+        echo -e "👉 初始账号: ${GREEN}${USERNAME}${PLAIN}"
+        echo -e "👉 初始密码: ${YELLOW}${PASSWORD}${PLAIN}"
+    else
+        echo -e "${YELLOW}日志中暂未找到账号信息，密码获取稍有延迟，请稍后使用选项 4 查看。${PLAIN}"
+    fi
+}
+
 install_komari() {
     apt update && apt install -y curl wget sed socat nginx-light iptables
     echo -e "${YELLOW}正在拉取官方程序...${PLAIN}"
@@ -63,7 +99,7 @@ install_komari() {
     echo -e "${GREEN}安装完成！正在为你提取初始账号信息...${PLAIN}"
     sleep 3
     echo -e "${BLUE}=======================================${PLAIN}"
-    journalctl -u komari -n 200 | grep -E "Username:|Password:" || echo "密码获取稍有延迟，请稍后使用选项 4 查看。"
+    show_credentials
     echo -e "${BLUE}=======================================${PLAIN}"
     read -p "按回车返回菜单..."
 }
@@ -137,18 +173,18 @@ while true; do
         3) 
            clear
            echo -e "${RED}正在彻底卸载 Komari 探针及管理面板...${PLAIN}"
-           # 调用官方卸载脚本
            wget -qO /tmp/komari-install.sh https://raw.githubusercontent.com/komari-monitor/komari/main/install-komari.sh
            chmod +x /tmp/komari-install.sh
            echo "3" | bash /tmp/komari-install.sh
            rm -f /tmp/komari-install.sh
-           # 清理我们自己生成的面板文件
            rm -f /usr/local/bin/komari
            echo -e "${GREEN}✅ 彻底卸载成功！面板即将自动关闭...${PLAIN}"
            sleep 2; exit 0 
            ;;
         4) 
-           journalctl -u komari -n 200 | grep -E "Username:|Password:"
+           echo -e "${BLUE}=======================================${PLAIN}"
+           show_credentials
+           echo -e "${BLUE}=======================================${PLAIN}"
            read -p "回车继续..." ;;
         5) add_domain ;;
         6) 
