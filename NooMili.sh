@@ -22,50 +22,127 @@ fi
 
 # ================= 系统基础功能 =================
 
-sys_info() {
+show_sys_info() {
     clear
-    echo -e "${CYAN}=========================================${RESET}"
-    echo -e "           系统信息查询"
-    echo -e "${CYAN}=========================================${RESET}"
-    echo -e "主机名:   ${GREEN}$(hostname)${RESET}"
-    if [ -f /etc/os-release ]; then
-        echo -e "系统版本: ${GREEN}$(cat /etc/os-release | grep PRETTY_NAME | cut -d '"' -f 2)${RESET}"
-    fi
-    echo -e "内核版本: ${GREEN}$(uname -r)${RESET}"
-    echo -e "CPU架构:  ${GREEN}$(uname -m)${RESET}"
-    echo -e "CPU核心数:${GREEN}$(nproc) 核${RESET}"
-    echo -e "内存使用: ${GREEN}$(free -m | awk 'NR==2{printf "%.2f%% ( %sMB / %sMB )", $3*100/$2, $3, $2}')${RESET}"
-    echo -e "磁盘使用: ${GREEN}$(df -h / | awk 'NR==2{print $5, " (", $3, "/", $2, ")"}')${RESET}"
-    echo -e "${CYAN}=========================================${RESET}"
+    echo -e "${CYAN}====================================================${RESET}"
+    echo -e "                 🖥️  系统核心信息看板"
+    echo -e "${CYAN}====================================================${RESET}"
+    
+    echo -e "${YELLOW}正在探测各项硬件与网络指标，请稍候...${RESET}"
+    
+    # 系统与内核
+    OS_NAME=$(cat /etc/os-release | grep -w "PRETTY_NAME" | cut -d= -f2 | tr -d '"')
+    KERNEL_VER=$(uname -r)
+    ARCH=$(uname -m)
+    UPTIME=$(uptime -p | sed 's/up //')
+    LOAD_AVG=$(cat /proc/loadavg | awk '{print $1, $2, $3}')
+    
+    # CPU 信息
+    CPU_MODEL=$(awk -F': ' '/model name/ {print $2}' /proc/cpuinfo | head -n 1)
+    CPU_CORES=$(nproc)
+    if [ -z "$CPU_MODEL" ]; then CPU_MODEL="Virtual CPU (未识别)"; fi
+    
+    # 内存信息
+    MEM_INFO=$(free -m | grep Mem)
+    MEM_TOTAL=$(echo $MEM_INFO | awk '{print $2}')
+    MEM_USED=$(echo $MEM_INFO | awk '{print $3}')
+    MEM_PERCENT=$(awk "BEGIN {printf \"%.1f\", $MEM_USED/$MEM_TOTAL*100}")
+    
+    # 硬盘信息 (根目录)
+    DISK_INFO=$(df -h / | tail -n 1)
+    DISK_TOTAL=$(echo $DISK_INFO | awk '{print $2}')
+    DISK_USED=$(echo $DISK_INFO | awk '{print $3}')
+    DISK_PERCENT=$(echo $DISK_INFO | awk '{print $5}')
+    
+    # IP 信息 (多源防挂检测，最长等待 3 秒)
+    IPV4=$(curl -s4m3 ipv4.icanhazip.com 2>/dev/null || curl -s4m3 api.ipify.org 2>/dev/null)
+    IPV6=$(curl -s6m3 ipv6.icanhazip.com 2>/dev/null || curl -s6m3 api6.ipify.org 2>/dev/null)
+    LOCAL_IP=$(hostname -I | awk '{print $1}')
+    
+    clear
+    echo -e "${CYAN}====================================================${RESET}"
+    echo -e " 💻 ${GREEN}系统 OS:${RESET}   $OS_NAME ($ARCH)"
+    echo -e " ⚙️  ${GREEN}系统内核:${RESET}  $KERNEL_VER"
+    echo -e " ⏱️  ${GREEN}在线时间:${RESET}  $UPTIME"
+    echo -e " 📈 ${GREEN}系统负载:${RESET}  $LOAD_AVG ${YELLOW}(1分/5分/15分)${RESET}"
+    echo -e "${CYAN}----------------------------------------------------${RESET}"
+    echo -e " 🧠 ${GREEN}CPU 核心:${RESET}  $CPU_CORES Core(s) | $CPU_MODEL"
+    echo -e " 📦 ${GREEN}内存占用:${RESET}  ${YELLOW}${MEM_USED}MB${RESET} / ${MEM_TOTAL}MB (${MEM_PERCENT}%)"
+    echo -e " 💽 ${GREEN}硬盘空间:${RESET}  ${YELLOW}${DISK_USED}${RESET} / ${DISK_TOTAL} (${DISK_PERCENT})"
+    echo -e "${CYAN}----------------------------------------------------${RESET}"
+    echo -e " 🌐 ${GREEN}内网 IPv4:${RESET} ${LOCAL_IP:-"未分配"}"
+    echo -e " 🌍 ${GREEN}公网 IPv4:${RESET} ${YELLOW}${IPV4:-"未分配或无 IPv4"}${RESET}"
+    echo -e " 🌍 ${GREEN}公网 IPv6:${RESET} ${YELLOW}${IPV6:-"未分配或无 IPv6"}${RESET}"
+    echo -e "${CYAN}====================================================${RESET}"
+    
     read -p "按回车键返回主菜单..."
 }
 
-sys_update() {
+update_system() {
     clear
-    echo -e "${YELLOW}正在更新系统软件源及包，请稍候...${RESET}"
-    if [ -x "$(command -v apt)" ]; then
-        apt update -y && apt upgrade -y
-    elif [ -x "$(command -v yum)" ]; then
+    echo -e "${CYAN}=========================================${RESET}"
+    echo -e "          🔄 正在执行全自动系统更新"
+    echo -e "${CYAN}=========================================${RESET}"
+    
+    if command -v apt-get >/dev/null 2>&1; then
+        echo -e "${YELLOW}检测到 Debian/Ubuntu 系统，正在使用 APT 更新...${RESET}"
+        # 禁用交互式提示，防止更新卡住
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get update -y
+        apt-get upgrade -y
+    elif command -v yum >/dev/null 2>&1; then
+        echo -e "${YELLOW}检测到 CentOS/RHEL 系系统，正在使用 YUM 更新...${RESET}"
+        yum makecache
         yum update -y
     else
-        echo -e "${RED}未知的包管理器，暂不支持自动更新。${RESET}"
+        echo -e "${RED}未知的包管理器！请手动执行更新。${RESET}"
     fi
-    echo -e "${GREEN}✅ 系统更新完成！${RESET}"
+    
+    echo -e "${CYAN}=========================================${RESET}"
+    echo -e "${GREEN}✅ 系统内核及软件包更新完毕！${RESET}"
     read -p "按回车键返回主菜单..."
 }
 
-sys_clean() {
+clean_system() {
     clear
-    echo -e "${YELLOW}正在清理系统垃圾及无用内核/依赖...${RESET}"
-    if [ -x "$(command -v apt)" ]; then
-        apt autoremove -y && apt clean -y
-    elif [ -x "$(command -v yum)" ]; then
-        yum autoremove -y && yum clean all
-    fi
+    echo -e "${CYAN}=========================================${RESET}"
+    echo -e "          🧹 开始深度系统瘦身清理"
+    echo -e "${CYAN}=========================================${RESET}"
+    
+    # 记录清理前的硬盘使用量 (KB)
+    SPACE_BEFORE=$(df / | tail -n 1 | awk '{print $3}')
+    
+    # 1. 清理系统日志 (最容易爆满的地方，保留最近 50MB)
+    echo -e "${YELLOW}[1/3] 正在清理 systemd 冗余日志记录...${RESET}"
     if command -v journalctl >/dev/null 2>&1; then
-        journalctl --vacuum-time=1d >/dev/null 2>&1
+        journalctl --vacuum-size=50M >/dev/null 2>&1
     fi
-    echo -e "${GREEN}✅ 系统清理完成！空间已释放。${RESET}"
+    
+    # 2. 清理包管理器缓存和无用依赖
+    echo -e "${YELLOW}[2/3] 正在清理软件包缓存与孤儿依赖...${RESET}"
+    if command -v apt-get >/dev/null 2>&1; then
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get autoremove -y >/dev/null 2>&1
+        apt-get clean >/dev/null 2>&1
+    elif command -v yum >/dev/null 2>&1; then
+        yum autoremove -y >/dev/null 2>&1
+        yum clean all >/dev/null 2>&1
+    fi
+    
+    # 3. 清空临时目录
+    echo -e "${YELLOW}[3/3] 正在清空临时文件残余...${RESET}"
+    rm -rf /tmp/* /var/tmp/* >/dev/null 2>&1
+    
+    # 计算清理出的空间
+    SPACE_AFTER=$(df / | tail -n 1 | awk '{print $3}')
+    FREED_KB=$((SPACE_BEFORE - SPACE_AFTER))
+    
+    # 防止因为后台写入导致算出来是负数
+    if [ "$FREED_KB" -lt 0 ]; then FREED_KB=0; fi
+    FREED_MB=$(awk "BEGIN {printf \"%.2f\", $FREED_KB/1024}")
+    
+    echo -e "${CYAN}=========================================${RESET}"
+    echo -e "${GREEN}✅ 清理完成！本次共为您的小鸡释放了 ${YELLOW}${FREED_MB} MB${GREEN} 的硬盘空间！${RESET}"
     read -p "按回车键返回主菜单..."
 }
 
@@ -92,7 +169,7 @@ launch_komari() {
 launch_lucky() {
     clear
     echo -e "${CYAN}=========================================${RESET}"
-    echo -e "       🛡️ Lucky (Web 版 SSL/反代管理)部署"
+    echo -e "        🛡️ Lucky (Web 版 SSL/反代管理)部署"
     echo -e "${CYAN}=========================================${RESET}"
     echo -e "说明：Lucky 是一款极低内存占用的 Web 面板工具。"
     echo -e "支持全自动申请 Let's Encrypt 等 SSL 证书，并自带反向代理功能。"
@@ -157,7 +234,7 @@ uninstall_nat() {
 # ================= 主菜单 =================
 while true; do
     clear
-    echo -e "${CYAN} _   _             __  __ _ _ _ ${RESET}"
+    echo -e "${CYAN} _    _             __  __ _ _ _ ${RESET}"
     echo -e "${CYAN}| \ | |           |  \/  (_) (_) ${RESET}"
     echo -e "${CYAN}|  \| | ___   ___ | \  / |_| |_  ${RESET}"
     echo -e "${CYAN}| . \` |/ _ \ / _ \| |\/| | | | | ${RESET}"
@@ -179,15 +256,15 @@ while true; do
     echo -e "  ${YELLOW}8.${RESET} 科技lion一键脚本 (外部)"
     echo -e "${CYAN}-----------------------------------------${RESET}"
     echo -e "  ${CYAN}9.${RESET} 更新 SSHTools 主控脚本"
-    echo -e "  ${RED}10.${RESET}卸载工具箱"
+    echo -e "  ${RED}10.${RESET} 卸载工具箱"
     echo -e "  ${GREEN}0.${RESET} 退出面板"
     echo -e "${CYAN}=========================================${RESET}"
     read -p "请输入你的选择: " choice
     
     case $choice in
-        1) sys_info ;;
-        2) sys_update ;;
-        3) sys_clean ;;
+        1) show_sys_info ;;
+        2) update_system ;;
+        3) clean_system ;;
         4) launch_mtp ;;
         5) launch_komari ;;
         6) launch_lucky ;;
