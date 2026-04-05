@@ -24,19 +24,24 @@ get_status() {
 
 choose_and_generate_secret() {
     echo ""
-    echo -e "${CYAN}--- 请选择 FakeTLS 伪装域名 ---${RESET}"
-    echo -e "  ${GREEN}1.${RESET} cn.bing.com        (推荐！微软必应，隐蔽性极高)"
-    echo -e "  ${GREEN}2.${RESET} itunes.apple.com   (推荐！苹果商店，隐蔽性极高)"
-    echo -e "  ${GREEN}3.${RESET} www.cloudflare.com (推荐！全球最大CDN，藏木于林)"
-    echo -e "  ${GREEN}4.${RESET} gateway.icloud.com (iCloud同步接口，流量自然)"
-    echo -e "  ${YELLOW}5.${RESET} 自定义伪装域名     (可放你自己的域名、要能直连的)"
+    echo -e "${CYAN}--- 请选择 FakeTLS 伪装域名 (藏木于林) ---${RESET}"
+    echo -e "  ${GREEN}1.${RESET} cn.bing.com          ${GREEN}2.${RESET} itunes.apple.com"
+    echo -e "  ${GREEN}3.${RESET} www.cloudflare.com   ${GREEN}4.${RESET} gateway.icloud.com"
+    echo -e "  ${GREEN}5.${RESET} aws.amazon.com       ${GREEN}6.${RESET} cdn.jsdelivr.net"
+    echo -e "  ${GREEN}7.${RESET} www.wechat.com       ${GREEN}8.${RESET} update.microsoft.com"
+    echo -e "  ${YELLOW}9.${RESET} 自定义伪装域名 (无懈可击：推荐填你自己的域名)"
+    echo -e "${CYAN}-----------------------------------------${RESET}"
     read -p "请输入序号选择 (回车默认选 1): " domain_choice
     
     case $domain_choice in
         2) FAKE_DOMAIN="itunes.apple.com" ;;
         3) FAKE_DOMAIN="www.cloudflare.com" ;;
         4) FAKE_DOMAIN="gateway.icloud.com" ;;
-        5) 
+        5) FAKE_DOMAIN="aws.amazon.com" ;;
+        6) FAKE_DOMAIN="cdn.jsdelivr.net" ;;
+        7) FAKE_DOMAIN="www.wechat.com" ;;
+        8) FAKE_DOMAIN="update.microsoft.com" ;;
+        9) 
             read -p "👉 请输入自定义【FakeTLS 伪装域名】: " FAKE_DOMAIN
             FAKE_DOMAIN=${FAKE_DOMAIN:-cn.bing.com}
             ;;
@@ -46,6 +51,19 @@ choose_and_generate_secret() {
     echo -e "${YELLOW}正在调用核心动态生成专属伪装密钥...${RESET}"
     SECRET=$(/usr/local/bin/mtg generate-secret "${FAKE_DOMAIN}")
     echo -e "✅ 已设置伪装域名: ${GREEN}${FAKE_DOMAIN}${RESET}"
+}
+
+# 强化的公网 IP 检测函数
+get_public_ip() {
+    local temp_ip
+    # 尝试多个可靠的 API，超时设为 3 秒，防止卡死
+    temp_ip=$(curl -s4m3 ipv4.icanhazip.com 2>/dev/null || curl -s4m3 api.ipify.org 2>/dev/null || curl -s4m3 ifconfig.me 2>/dev/null)
+    # 如果抓到的是有效 IP 格式，则返回，否则返回空
+    if [[ "$temp_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo "$temp_ip"
+    else
+        echo ""
+    fi
 }
 
 install_mtp() {
@@ -64,7 +82,10 @@ install_mtp() {
     chmod +x /usr/local/bin/mtg
     rm -rf mtg.tar.gz mtg-2.1.7-linux-amd64
     
-    AUTO_IP=$(curl -s4m5 ifconfig.me || curl -s4m5 ipinfo.io/ip)
+    AUTO_IP=$(get_public_ip)
+    # 如果没获取到，给个明确的提示词
+    DISPLAY_IP=${AUTO_IP:-"获取失败,请手动输入!"}
+    
     echo ""
     echo -e "${CYAN}--- 请选择你的机器网络环境 ---${RESET}"
     echo -e "  ${GREEN}1.${RESET} NAT 小鸡 (仅开放部分映射端口) [默认]"
@@ -72,7 +93,6 @@ install_mtp() {
     read -p "请输入序号 (回车默认选 1): " net_choice
     
     echo ""
-    # 防呆设计：回车为空或输入 1，一律走 NAT 逻辑
     if [ -z "$net_choice" ] || [ "$net_choice" == "1" ]; then
         echo -e "${YELLOW}💡 提示: 大部分 NAT 支持自定义映射端口，不支持的请手动输入。${RESET}"
         read -p "👉 1. 请输入【公网/外网可用端口】(回车默认 10086): " OUT_PORT
@@ -81,18 +101,32 @@ install_mtp() {
         read -p "👉 2. 请输入小鸡【内网监听端口】(回车默认与外网一致: $OUT_PORT): " IN_PORT
         IN_PORT=${IN_PORT:-$OUT_PORT}
         
-        read -p "👉 3. 请输入商家【公网 IPv4 地址】(回车尝试自动获取: $AUTO_IP): " PUBLIC_IP
+        # 强提醒：如果识别错误，一定要在这里手动输入！
+        read -p "👉 3. 请输入商家【公网 IPv4 地址】(识别出: $DISPLAY_IP): " PUBLIC_IP
         PUBLIC_IP=${PUBLIC_IP:-$AUTO_IP}
+        
+        # 终极防呆：如果用户没输入，而且自动获取也失败了，拦住他不让继续
+        if [ -z "$PUBLIC_IP" ]; then
+            echo -e "${RED}错误：必须拥有公网 IP 才能生成有效链接！请重新运行并手动输入。${RESET}"
+            exit 1
+        fi
         
         echo -e "   ${GREEN}✅ NAT 节点配置完成 -> IP: ${PUBLIC_IP} | 内网端口: ${IN_PORT} | 外网端口: ${OUT_PORT}${RESET}"
 
-    # 选择 2 走 VPS 逻辑
     elif [ "$net_choice" == "2" ]; then
         echo -e "${YELLOW}💡 提示: 独立 VPS 推荐使用 443 端口(最隐蔽)，但如果你机器上装了建站面板(占用443)，请换一个别的端口。${RESET}"
         read -p "👉 请输入你想使用的端口 (回车默认 443): " IN_PORT
         IN_PORT=${IN_PORT:-443}
         OUT_PORT=$IN_PORT
-        PUBLIC_IP=$AUTO_IP
+        
+        read -p "👉 请确认【公网 IPv4 地址】(识别出: $DISPLAY_IP，如果不对请手动输入): " PUBLIC_IP
+        PUBLIC_IP=${PUBLIC_IP:-$AUTO_IP}
+        
+        if [ -z "$PUBLIC_IP" ]; then
+            echo -e "${RED}错误：无法获取公网 IP！请重新运行并手动输入。${RESET}"
+            exit 1
+        fi
+        
         echo -e "   ${GREEN}✅ VPS 节点配置完成 -> IP: ${PUBLIC_IP} | 端口: ${IN_PORT}${RESET}"
     else
         echo -e "${RED}输入错误，请输入 1 或 2！${RESET}"
@@ -161,11 +195,19 @@ modify_config() {
     clear
     if [ ! -f "$INFO_FILE" ]; then echo -e "${RED}请先安装！${RESET}"; read -p "按回车返回..."; return; fi
     source $INFO_FILE
+    
+    AUTO_IP=$(get_public_ip)
+    DISPLAY_IP=${AUTO_IP:-"获取失败"}
+    
     echo -e "${CYAN}--- 修改映射与配置信息 ---${RESET}"
     read -p "输入新【内网监听端口】 (回车保持 ${IN_PORT}): " NEW_IN
     NEW_IN=${NEW_IN:-$IN_PORT}
+    
+    # 修改配置时同样提示现在的自动识别IP，防止NAT变动
+    echo -e "${YELLOW}当前机器识别到的外部IP为: ${DISPLAY_IP}${RESET}"
     read -p "输入新【公网 IP】 (回车保持 ${PUBLIC_IP}): " NEW_IP
     NEW_IP=${NEW_IP:-$PUBLIC_IP}
+    
     read -p "输入新【公网端口】 (回车保持 ${OUT_PORT}): " NEW_OUT
     NEW_OUT=${NEW_OUT:-$OUT_PORT}
     
