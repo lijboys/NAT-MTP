@@ -69,6 +69,18 @@ install_mtp() {
     echo -e "${CYAN}  🚀 开始部署 mtg v2 伪装代理${RESET}"
     echo -e "${CYAN}=========================================${RESET}"
     
+    # 终极防呆：检测是否已经安装
+    if [ -f "/usr/local/bin/mtg" ] && [ -f "$INFO_FILE" ]; then
+        echo -e "${YELLOW}⚠️ 检测到当前机器已经安装了 MTP 代理服务！${RESET}"
+        read -p "👉 是否要继续【覆盖重装】并清除原有配置？[y/N]: " confirm_reinstall
+        if [[ "$confirm_reinstall" != "y" && "$confirm_reinstall" != "Y" ]]; then
+            echo -e "${GREEN}✅ 已取消安装，保留现有配置。${RESET}"
+            sleep 1
+            return
+        fi
+        echo -e "${RED}开始执行覆盖重装流程...${RESET}"
+    fi
+    
     if command -v systemctl >/dev/null 2>&1; then systemctl stop mtg 2>/dev/null; fi
     pkill -f "mtg run" 2>/dev/null
     
@@ -157,7 +169,6 @@ EOT
     
     TG_LINK="tg://proxy?server=${PUBLIC_IP}&port=${OUT_PORT}&secret=${SECRET}"
     
-    # 彻底修复保存 Bug：用双引号强制包裹变量，防止 Bash 误解析 '&' 符号
     echo "IN_PORT=\"${IN_PORT}\"" > $INFO_FILE
     echo "PUBLIC_IP=\"${PUBLIC_IP}\"" >> $INFO_FILE
     echo "OUT_PORT=\"${OUT_PORT}\"" >> $INFO_FILE
@@ -221,7 +232,6 @@ EOT
     
     TG_LINK="tg://proxy?server=${NEW_IP}&port=${NEW_OUT}&secret=${SECRET}"
     
-    # 彻底修复保存 Bug：用双引号强制包裹变量
     echo "IN_PORT=\"${NEW_IN}\"" > $INFO_FILE
     echo "PUBLIC_IP=\"${NEW_IP}\"" >> $INFO_FILE
     echo "OUT_PORT=\"${NEW_OUT}\"" >> $INFO_FILE
