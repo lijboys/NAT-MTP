@@ -7,7 +7,7 @@ CYAN="\033[36m"
 BLUE="\033[34m"
 RESET="\033[0m"
 
-# 你的 GitHub Raw 链接 (已全面更新为 SSHTools 仓库)
+# 你的 GitHub Raw 链接
 NAT_URL="https://raw.githubusercontent.com/lijboys/SSHTools/refs/heads/main/NooMili.sh"
 MTP_URL="https://raw.githubusercontent.com/lijboys/SSHTools/refs/heads/main/mtp.sh"
 KOMARI_URL="https://raw.githubusercontent.com/lijboys/SSHTools/refs/heads/main/komari.sh"
@@ -48,15 +48,27 @@ show_sys_info() {
     MEM_USED=$(echo $MEM_INFO | awk '{print $3}')
     MEM_PERCENT=$(awk "BEGIN {printf \"%.1f\", $MEM_USED/$MEM_TOTAL*100}")
     
-    # 硬盘信息 (根目录)
+    # 硬盘信息
     DISK_INFO=$(df -h / | tail -n 1)
     DISK_TOTAL=$(echo $DISK_INFO | awk '{print $2}')
     DISK_USED=$(echo $DISK_INFO | awk '{print $3}')
     DISK_PERCENT=$(echo $DISK_INFO | awk '{print $5}')
     
-    # IP 信息 (多源防挂检测，最长等待 3 秒)
-    IPV4=$(curl -s4m3 ipv4.icanhazip.com 2>/dev/null || curl -s4m3 api.ipify.org 2>/dev/null)
-    IPV6=$(curl -s6m3 ipv6.icanhazip.com 2>/dev/null || curl -s6m3 api6.ipify.org 2>/dev/null)
+    # IP 信息逻辑重构：优先读取本地校准记录
+    if [ -f "/etc/.noomili_ip" ]; then
+        IPV4="${GREEN}$(cat /etc/.noomili_ip)${RESET} ${YELLOW}(已手动校准)${RESET}"
+    else
+        IPV4_RAW=$(curl -s4m3 ipv4.icanhazip.com 2>/dev/null || curl -s4m3 api.ipify.org 2>/dev/null || curl -s4m3 ifconfig.me 2>/dev/null)
+        if [[ "$IPV4_RAW" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then 
+            IPV4="$IPV4_RAW ${RED}(出网IP/动态)${RESET}"
+        else
+            IPV4="获取失败"
+        fi
+    fi
+    
+    IPV6=$(curl -s6m3 ipv6.icanhazip.com 2>/dev/null || curl -s6m3 api6.ipify.org 2>/dev/null || curl -s6m3 ifconfig.co 2>/dev/null)
+    if [[ ! "$IPV6" =~ ^[0-9a-fA-F:]+$ ]]; then IPV6="未分配或无 IPv6"; fi
+    
     LOCAL_IP=$(hostname -I | awk '{print $1}')
     
     clear
@@ -71,11 +83,32 @@ show_sys_info() {
     echo -e " 💽 ${GREEN}硬盘空间:${RESET}  ${YELLOW}${DISK_USED}${RESET} / ${DISK_TOTAL} (${DISK_PERCENT})"
     echo -e "${CYAN}----------------------------------------------------${RESET}"
     echo -e " 🌐 ${GREEN}内网 IPv4:${RESET} ${LOCAL_IP:-"未分配"}"
-    echo -e " 🌍 ${GREEN}公网 IPv4:${RESET} ${YELLOW}${IPV4:-"未分配或无 IPv4"}${RESET}"
-    echo -e " 🌍 ${GREEN}公网 IPv6:${RESET} ${YELLOW}${IPV6:-"未分配或无 IPv6"}${RESET}"
+    echo -e " 🌍 ${GREEN}公网 IPv4:${RESET} $IPV4"
+    echo -e " 🌍 ${GREEN}公网 IPv6:${RESET} ${YELLOW}${IPV6}${RESET}"
     echo -e "${CYAN}====================================================${RESET}"
     
-    read -p "按回车键返回主菜单..."
+    # 增加校准选项
+    read -p "按回车返回菜单 (或输入 c 手动校准公网 IPv4): " sub_choice
+    if [[ "$sub_choice" == "c" || "$sub_choice" == "C" ]]; then
+        echo ""
+        read -p "👉 请输入你在商家控制面板看到的真实 IPv4 地址: " user_ip
+        if [[ "$user_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "$user_ip" > /etc/.noomili_ip
+            echo -e "${GREEN}✅ IP 校准成功！已永久保存。${RESET}"
+            sleep 1
+            show_sys_info # 刷新面板
+        else
+            echo -e "${RED}❌ 格式错误，请重新输入正确的 IP 地址！${RESET}"
+            sleep 2
+            show_sys_info
+        fi
+    elif [[ "$sub_choice" == "d" || "$sub_choice" == "D" ]]; then
+        # 隐藏功能：输入 d 可以删除校准，恢复自动获取
+        rm -f /etc/.noomili_ip
+        echo -e "${YELLOW}已恢复自动获取 IP。${RESET}"
+        sleep 1
+        show_sys_info
+    fi
 }
 
 update_system() {
@@ -86,7 +119,6 @@ update_system() {
     
     if command -v apt-get >/dev/null 2>&1; then
         echo -e "${YELLOW}检测到 Debian/Ubuntu 系统，正在使用 APT 更新...${RESET}"
-        # 禁用交互式提示，防止更新卡住
         export DEBIAN_FRONTEND=noninteractive
         apt-get update -y
         apt-get upgrade -y
@@ -109,16 +141,13 @@ clean_system() {
     echo -e "          🧹 开始深度系统瘦身清理"
     echo -e "${CYAN}=========================================${RESET}"
     
-    # 记录清理前的硬盘使用量 (KB)
     SPACE_BEFORE=$(df / | tail -n 1 | awk '{print $3}')
     
-    # 1. 清理系统日志 (最容易爆满的地方，保留最近 50MB)
     echo -e "${YELLOW}[1/3] 正在清理 systemd 冗余日志记录...${RESET}"
     if command -v journalctl >/dev/null 2>&1; then
         journalctl --vacuum-size=50M >/dev/null 2>&1
     fi
     
-    # 2. 清理包管理器缓存和无用依赖
     echo -e "${YELLOW}[2/3] 正在清理软件包缓存与孤儿依赖...${RESET}"
     if command -v apt-get >/dev/null 2>&1; then
         export DEBIAN_FRONTEND=noninteractive
@@ -129,15 +158,12 @@ clean_system() {
         yum clean all >/dev/null 2>&1
     fi
     
-    # 3. 清空临时目录
     echo -e "${YELLOW}[3/3] 正在清空临时文件残余...${RESET}"
     rm -rf /tmp/* /var/tmp/* >/dev/null 2>&1
     
-    # 计算清理出的空间
     SPACE_AFTER=$(df / | tail -n 1 | awk '{print $3}')
     FREED_KB=$((SPACE_BEFORE - SPACE_AFTER))
     
-    # 防止因为后台写入导致算出来是负数
     if [ "$FREED_KB" -lt 0 ]; then FREED_KB=0; fi
     FREED_MB=$(awk "BEGIN {printf \"%.2f\", $FREED_KB/1024}")
     
@@ -178,7 +204,6 @@ launch_lucky() {
     read -p "确认安装 Lucky 面板吗？[Y/n]: " install_choice
     if [[ "$install_choice" == "Y" || "$install_choice" == "y" || "$install_choice" == "" ]]; then
         echo -e "${YELLOW}正在调用 Lucky 官方一键安装脚本...${RESET}"
-        # 调用大吉官方的一键脚本
         curl -fsSL https://gitee.com/gdy666/lucky/raw/main/install.sh | bash
         echo -e "${GREEN}✅ Lucky 部署完毕！请根据上方官方提示的端口和默认密码登录 Web 页面。${RESET}"
     else
@@ -216,14 +241,15 @@ uninstall_nat() {
                 pkill -f "komari" 2>/dev/null
                 rm -rf /opt/komari /usr/local/bin/komari 
             fi
-            # 提示手动卸载 Lucky
             echo -e "${YELLOW}提示: 如果你安装了 Lucky，请在终端输入 lucky_uninstall 进行彻底卸载。${RESET}"
             rm -f /usr/local/bin/n
+            rm -f /etc/.noomili_ip
             echo -e "${GREEN}✅ 基础工具已卸载！再见！${RESET}"
             exit 0
             ;;
         2)
             rm -f /usr/local/bin/n
+            rm -f /etc/.noomili_ip
             echo -e "${GREEN}✅ 主控面板已卸载！${RESET}"
             exit 0
             ;;
@@ -241,7 +267,7 @@ while true; do
     echo -e "${CYAN}| |\  | (_) | (_) | |  | | | | | ${RESET}"
     echo -e "${CYAN}\_| \_/\___/ \___/\_|  |_/_|_|_| ${RESET}"
     echo -e "${CYAN}=========================================${RESET}"
-    echo -e " SSHTools工具箱 ${GREEN}v2.2.0${RESET}"
+    echo -e " SSHTools工具箱 ${GREEN}v2.2.2${RESET}"
     echo -e " 命令行输入 ${YELLOW}n${RESET} 可快速启动脚本"
     echo -e "${CYAN}-----------------------------------------${RESET}"
     echo -e "  ${GREEN}1.${RESET} 系统信息查询"
