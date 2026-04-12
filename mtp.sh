@@ -655,16 +655,30 @@ fi
 
 while true; do
     clear
+
+    if [ -f "$INFO_FILE" ]; then
+        CURRENT_NODE_NAME=$(read_info_value NODE_NAME)
+        CURRENT_PUBLIC_IP=$(read_info_value PUBLIC_IP)
+        CURRENT_OUT_PORT=$(read_info_value OUT_PORT)
+        [ -z "$CURRENT_NODE_NAME" ] && CURRENT_NODE_NAME="$(get_default_node_name)"
+    else
+        CURRENT_NODE_NAME="未安装"
+        CURRENT_PUBLIC_IP="-"
+        CURRENT_OUT_PORT="-"
+    fi
+
     echo -e "${CYAN}=========================================${RESET}"
     echo -e "   🦇 MTP 代理管理面板 ${GREEN}${SCRIPT_VERSION}${RESET}"
     echo -e "${CYAN}=========================================${RESET}"
-    echo -e "当前状态: $(get_status)"
+    echo -e "当前状态: ${RESET}$(get_status)"
+    echo -e "节点备注: ${GREEN}${CURRENT_NODE_NAME}${RESET}"
+    echo -e "当前地址: ${YELLOW}${CURRENT_PUBLIC_IP}:${CURRENT_OUT_PORT}${RESET}"
     echo -e "快捷指令: ${GREEN}mtp${RESET}"
     echo -e "MTG版本:  ${YELLOW}v${MTG_VERSION}${RESET}"
     echo -e "${CYAN}-----------------------------------------${RESET}"
     echo -e "  ${GREEN}1.${RESET} 安装 / 重装 MTP (自动适配网络环境)"
     echo -e "  ${GREEN}2.${RESET} 查看当前 TG 链接与信息"
-    echo -e "  ${GREEN}3.${RESET} 修改端口、IP与伪装域名"
+    echo -e "  ${GREEN}3.${RESET} 修改端口、IP、备注名与伪装域名"
     echo -e "  ${YELLOW}4.${RESET} 启动 MTP 服务"
     echo -e "  ${YELLOW}5.${RESET} 停止 MTP 服务"
     echo -e "  ${CYAN}6.${RESET} 重启 MTP 服务"
