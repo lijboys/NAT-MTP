@@ -2,7 +2,7 @@
 
 <div align="center">
   
-[🦇 MTP 代理搭建教程](./MD/MTP.md) | [📊 Komari 探针部署教程](./MD/komari.md) | [☁️ CF Worker 短链搭建教程](./MD/CF.md)
+[🦇 MTP 代理搭建教程](./MD/MTP.md) | [📊 Komari 探针部署教程](./MD/komari.md) | [☁️ CF Worker 短链搭建教程](./MD/cf.md)
 
 </div>
 
@@ -21,7 +21,7 @@
 bash <(curl -fsSL vvvps.qzz.io)
 ````
 
-👉 **[点击查看：CF Worker 极简短链搭建教程](https://www.google.com/search?q=./MD/CF.md)**
+👉 **[点击查看：CF Worker 极简短链搭建教程](https://www.google.com/search?q=./MD/cf.md)**
 
 ### 方案 B：免费短链白嫖（免域名、极简指令）
 
