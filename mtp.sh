@@ -1,3 +1,4 @@
+cat > /usr/local/bin/mtp <<'EOFMTP'
 #!/bin/bash
 
 # ============================================
@@ -31,17 +32,13 @@ pause() {
     read -p "按回车键返回主菜单..."
 }
 
-# ================= 基础检测 =================
-
 check_dependencies() {
     local missing=()
     for cmd in curl tar grep awk sed pgrep; do
         command -v "$cmd" >/dev/null 2>&1 || missing+=("$cmd")
     done
-
     if [ ${#missing[@]} -gt 0 ]; then
         echo -e "${RED}❌ 缺少依赖: ${missing[*]}${RESET}"
-        echo -e "${YELLOW}请先安装缺失组件后再运行。${RESET}"
         return 1
     fi
     return 0
@@ -84,8 +81,6 @@ read_info_value() {
     grep "^${key}=" "$INFO_FILE" 2>/dev/null | head -n1 | cut -d'"' -f2
 }
 
-# ================= 状态与工具函数 =================
-
 get_status() {
     if command -v systemctl >/dev/null 2>&1; then
         if systemctl is-active --quiet mtg; then
@@ -107,7 +102,6 @@ get_public_ip() {
     temp_ip=$(curl -s4m3 --connect-timeout 3 ipv4.icanhazip.com 2>/dev/null)
     [ -z "$temp_ip" ] && temp_ip=$(curl -s4m3 --connect-timeout 3 api.ipify.org 2>/dev/null)
     [ -z "$temp_ip" ] && temp_ip=$(curl -s4m3 --connect-timeout 3 ifconfig.me 2>/dev/null)
-
     if is_valid_ipv4 "$temp_ip"; then
         echo "$temp_ip"
     else
@@ -116,13 +110,7 @@ get_public_ip() {
 }
 
 write_info_file() {
-    local in_port="$1"
-    local public_ip="$2"
-    local out_port="$3"
-    local fake_domain="$4"
-    local secret="$5"
-    local tg_link="$6"
-
+    local in_port="$1" public_ip="$2" out_port="$3" fake_domain="$4" secret="$5" tg_link="$6"
     cat > "$INFO_FILE" <<EOT
 IN_PORT="${in_port}"
 PUBLIC_IP="${public_ip}"
@@ -134,16 +122,13 @@ EOT
 }
 
 write_config_file() {
-    local in_port="$1"
-    local secret="$2"
-
+    local in_port="$1" secret="$2"
     cat > "$CONFIG_FILE" <<EOT
 secret = "${secret}"
 bind-to = "0.0.0.0:${in_port}"
 EOT
 }
 
-# ================= 关键修复：增强无 systemd 保活 =================
 start_mtg_service() {
     if command -v systemctl >/dev/null 2>&1; then
         mkdir -p /etc/systemd/system/
@@ -165,18 +150,12 @@ EOT
         systemctl enable mtg >/dev/null 2>&1
         systemctl restart mtg
         sleep 1
-
-        if systemctl is-active --quiet mtg; then
-            return 0
-        else
-            return 1
-        fi
+        systemctl is-active --quiet mtg
+        return $?
     else
-        # 无 systemd 环境（你的 NAT 小鸡）—— 增强版保活
         pkill -f "/usr/local/bin/mtg run" 2>/dev/null
         nohup /usr/local/bin/mtg run "$CONFIG_FILE" > "$LOG_FILE" 2>&1 &
         sleep 1
-
         if pgrep -f "/usr/local/bin/mtg run ${CONFIG_FILE}" >/dev/null 2>&1; then
             (
               crontab -l 2>/dev/null | grep -v "/usr/local/bin/mtg run ${CONFIG_FILE}"
@@ -184,9 +163,8 @@ EOT
               echo "*/1 * * * * pgrep -f '/usr/local/bin/mtg run ${CONFIG_FILE}' >/dev/null || nohup /usr/local/bin/mtg run ${CONFIG_FILE} > ${LOG_FILE} 2>&1 &"
             ) | crontab -
             return 0
-        else
-            return 1
         fi
+        return 1
     fi
 }
 
@@ -201,44 +179,17 @@ stop_mtg_service() {
 download_mtg() {
     local arch download_url tmp_dir mtg_bin
     arch=$(detect_arch)
-
-    if [ "$arch" = "unsupported" ]; then
-        echo -e "${RED}❌ 当前架构不受支持: $(uname -m)${RESET}"
-        return 1
-    fi
-
+    [ "$arch" = "unsupported" ] && { echo -e "${RED}❌ 不支持架构: $(uname -m)${RESET}"; return 1; }
     download_url="https://github.com/9seconds/mtg/releases/download/v${MTG_VERSION}/mtg-${MTG_VERSION}-linux-${arch}.tar.gz"
     tmp_dir=$(mktemp -d)
-
     echo -e "${YELLOW}正在下载 mtg v${MTG_VERSION} (${arch}) ...${RESET}"
-    if ! curl -fL --connect-timeout 10 -o "${tmp_dir}/mtg.tar.gz" "$download_url"; then
-        echo -e "${RED}❌ mtg 下载失败！${RESET}"
-        rm -rf "$tmp_dir"
-        return 1
-    fi
-
-    if ! tar -zxf "${tmp_dir}/mtg.tar.gz" -C "$tmp_dir"; then
-        echo -e "${RED}❌ mtg 解压失败！${RESET}"
-        rm -rf "$tmp_dir"
-        return 1
-    fi
-
+    curl -fL --connect-timeout 10 -o "${tmp_dir}/mtg.tar.gz" "$download_url" || { rm -rf "$tmp_dir"; return 1; }
+    tar -zxf "${tmp_dir}/mtg.tar.gz" -C "$tmp_dir" || { rm -rf "$tmp_dir"; return 1; }
     mtg_bin=$(find "$tmp_dir" -type f -name mtg | head -n 1)
-    if [ -z "$mtg_bin" ]; then
-        echo -e "${RED}❌ 未找到 mtg 可执行文件！${RESET}"
-        rm -rf "$tmp_dir"
-        return 1
-    fi
-
+    [ -z "$mtg_bin" ] && { rm -rf "$tmp_dir"; return 1; }
     install -m 755 "$mtg_bin" /usr/local/bin/mtg
     rm -rf "$tmp_dir"
-
-    if ! /usr/local/bin/mtg --help >/dev/null 2>&1; then
-        echo -e "${RED}❌ mtg 安装后自检失败！${RESET}"
-        return 1
-    fi
-
-    return 0
+    /usr/local/bin/mtg --help >/dev/null 2>&1
 }
 
 choose_and_generate_secret() {
@@ -246,225 +197,108 @@ choose_and_generate_secret() {
     echo -e "${CYAN}================ FakeTLS 伪装域名选择 ================${RESET}"
     echo -e "${YELLOW}提示：若你有自己的真实域名，强烈建议优先使用自定义域名。${RESET}"
     echo -e "${CYAN}------------------------------------------------------${RESET}"
-
-    printf "  ${GREEN}%-4s${RESET} %-22s ${YELLOW}%-18s${RESET}  ${GREEN}%-4s${RESET} %-22s ${YELLOW}%s${RESET}\n" \
-        "1." "www.cloudflare.com" "(通用稳妥/推荐)" \
-        "2." "www.microsoft.com" "(国际通用/推荐)"
-
-    printf "  ${GREEN}%-4s${RESET} %-22s ${YELLOW}%-18s${RESET}  ${GREEN}%-4s${RESET} %-22s ${YELLOW}%s${RESET}\n" \
-        "3." "www.apple.com" "(苹果生态/推荐)" \
-        "4." "www.bing.com" "(中文常见/推荐)"
-
-    printf "  ${GREEN}%-4s${RESET} %-22s ${YELLOW}%-18s${RESET}  ${GREEN}%-4s${RESET} %-22s ${YELLOW}%s${RESET}\n" \
-        "5." "gateway.icloud.com" "(服务风格)" \
-        "6." "cdn.jsdelivr.net" "(CDN风格)"
-
-    printf "  ${GREEN}%-4s${RESET} %-22s ${YELLOW}%-18s${RESET}  ${GREEN}%-4s${RESET} %-22s ${YELLOW}%s${RESET}\n" \
-        "7." "www.wechat.com" "(国内常见)" \
-        "8." "www.dropbox.com" "(网盘风格)"
-
-    printf "  ${GREEN}%-4s${RESET} %-22s ${YELLOW}%-18s${RESET}  ${YELLOW}%-4s${RESET} %-22s ${RED}%s${RESET}\n" \
-        "9." "onedrive.live.com" "(微软网盘)" \
-        "10." "自定义伪装域名" "(强烈推荐)"
-
+    printf "  ${GREEN}%-4s${RESET} %-22s ${YELLOW}%-18s${RESET}  ${GREEN}%-4s${RESET} %-22s ${YELLOW}%s${RESET}\n" "1." "www.cloudflare.com" "(通用稳妥/推荐)" "2." "www.microsoft.com" "(国际通用/推荐)"
+    printf "  ${GREEN}%-4s${RESET} %-22s ${YELLOW}%-18s${RESET}  ${GREEN}%-4s${RESET} %-22s ${YELLOW}%s${RESET}\n" "3." "www.apple.com" "(苹果生态/推荐)" "4." "www.bing.com" "(中文常见/推荐)"
+    printf "  ${GREEN}%-4s${RESET} %-22s ${YELLOW}%-18s${RESET}  ${GREEN}%-4s${RESET} %-22s ${YELLOW}%s${RESET}\n" "5." "gateway.icloud.com" "(服务风格)" "6." "cdn.jsdelivr.net" "(CDN风格)"
+    printf "  ${GREEN}%-4s${RESET} %-22s ${YELLOW}%-18s${RESET}  ${GREEN}%-4s${RESET} %-22s ${YELLOW}%s${RESET}\n" "7." "www.wechat.com" "(国内常见)" "8." "www.dropbox.com" "(网盘风格)"
+    printf "  ${GREEN}%-4s${RESET} %-22s ${YELLOW}%-18s${RESET}  ${YELLOW}%-4s${RESET} %-22s ${RED}%s${RESET}\n" "9." "onedrive.live.com" "(微软网盘)" "10." "自定义伪装域名" "(强烈推荐)"
     echo -e "${CYAN}------------------------------------------------------${RESET}"
     read -p "请输入序号选择 (回车默认选 1): " domain_choice
-
     case "$domain_choice" in
-        2)  FAKE_DOMAIN="www.microsoft.com" ;;
-        3)  FAKE_DOMAIN="www.apple.com" ;;
-        4)  FAKE_DOMAIN="www.bing.com" ;;
-        5)  FAKE_DOMAIN="gateway.icloud.com" ;;
-        6)  FAKE_DOMAIN="cdn.jsdelivr.net" ;;
-        7)  FAKE_DOMAIN="www.wechat.com" ;;
-        8)  FAKE_DOMAIN="www.dropbox.com" ;;
-        9)  FAKE_DOMAIN="onedrive.live.com" ;;
+        2) FAKE_DOMAIN="www.microsoft.com" ;;
+        3) FAKE_DOMAIN="www.apple.com" ;;
+        4) FAKE_DOMAIN="www.bing.com" ;;
+        5) FAKE_DOMAIN="gateway.icloud.com" ;;
+        6) FAKE_DOMAIN="cdn.jsdelivr.net" ;;
+        7) FAKE_DOMAIN="www.wechat.com" ;;
+        8) FAKE_DOMAIN="www.dropbox.com" ;;
+        9) FAKE_DOMAIN="onedrive.live.com" ;;
         10)
             read -p "👉 请输入自定义【FakeTLS 伪装域名】: " FAKE_DOMAIN
             FAKE_DOMAIN=${FAKE_DOMAIN:-www.cloudflare.com}
-
-            if ! is_valid_domain "$FAKE_DOMAIN"; then
-                echo -e "${RED}❌ 域名格式不正确！${RESET}"
-                return 1
-            fi
-
-            if ! getent ahosts "$FAKE_DOMAIN" >/dev/null 2>&1; then
-                echo -e "${YELLOW}⚠️ 提示：该域名当前无法解析，仍将继续尝试生成密钥。${RESET}"
-            fi
+            is_valid_domain "$FAKE_DOMAIN" || { echo -e "${RED}❌ 域名格式不正确！${RESET}"; return 1; }
             ;;
-        *)  FAKE_DOMAIN="www.cloudflare.com" ;;
+        *) FAKE_DOMAIN="www.cloudflare.com" ;;
     esac
-
-    if [ ! -x "/usr/local/bin/mtg" ]; then
-        echo -e "${RED}❌ mtg 核心不存在，无法生成密钥！${RESET}"
-        return 1
-    fi
-
+    [ ! -x "/usr/local/bin/mtg" ] && { echo -e "${RED}❌ mtg 核心不存在！${RESET}"; return 1; }
     echo -e "${YELLOW}正在动态生成专属伪装密钥...${RESET}"
     SECRET=$(/usr/local/bin/mtg generate-secret "${FAKE_DOMAIN}" 2>/dev/null)
-
-    if [ -z "$SECRET" ]; then
-        echo -e "${RED}❌ 密钥生成失败！${RESET}"
-        return 1
-    fi
-
+    [ -z "$SECRET" ] && { echo -e "${RED}❌ 密钥生成失败！${RESET}"; return 1; }
     echo -e "✅ 已设置伪装域名: ${GREEN}${FAKE_DOMAIN}${RESET}"
     return 0
 }
-
-# ================= 业务功能 =================
-# （install_mtp、view_link、modify_config、start_service_manual、stop_service_manual、restart_service_manual、view_logs、uninstall_mtp、update_script 全部保持你原来的代码不变）
-
-install_mtp() {
-    # ...（你原来的完整 install_mtp 函数，原样保留）
-    # 这里省略以节省篇幅，但实际复制时请把你原来的整个 install_mtp 函数粘贴进来
-    # （为了不让你手动找，我在下面完整给出全部函数）
-}
-
-# （以下为完整函数，全部保留你原来的逻辑）
 
 install_mtp() {
     clear
     echo -e "${CYAN}=========================================${RESET}"
     echo -e "${CYAN}  🚀 开始部署 mtg v2 伪装代理${RESET}"
     echo -e "${CYAN}=========================================${RESET}"
-
     check_dependencies || { pause; return; }
-
     if [ -f "/usr/local/bin/mtg" ] && [ -f "$INFO_FILE" ]; then
         echo -e "${YELLOW}⚠️ 检测到当前机器已经安装了 MTP 代理服务！${RESET}"
         read -p "👉 是否要继续【覆盖重装】并清除原有配置？[y/N]: " confirm_reinstall
-        if [[ "$confirm_reinstall" != "y" && "$confirm_reinstall" != "Y" ]]; then
-            echo -e "${GREEN}✅ 已取消安装，保留现有配置。${RESET}"
-            sleep 1
-            return
-        fi
-        echo -e "${RED}开始执行覆盖重装流程...${RESET}"
+        [[ "$confirm_reinstall" != "y" && "$confirm_reinstall" != "Y" ]] && { echo -e "${GREEN}✅ 已取消安装。${RESET}"; sleep 1; return; }
     fi
-
     stop_mtg_service
-
-    if ! download_mtg; then
-        pause
-        return
-    fi
-
+    download_mtg || { pause; return; }
     AUTO_IP=$(get_public_ip)
     DISPLAY_IP=${AUTO_IP:-"获取失败，请手动输入"}
-
     echo ""
     echo -e "${CYAN}--- 请选择你的机器网络环境 ---${RESET}"
     echo -e "  ${GREEN}1.${RESET} NAT 小鸡 (仅开放部分映射端口) [默认]"
     echo -e "  ${YELLOW}2.${RESET} 独立 VPS (拥有独立公网 IP，全端口开放)"
     read -p "请输入序号 (回车默认选 1): " net_choice
-
     echo ""
     if [ -z "$net_choice" ] || [ "$net_choice" = "1" ]; then
         echo -e "${YELLOW}💡 提示: NAT 机器请确认商家后台映射端口。${RESET}"
-
         read -p "👉 1. 请输入【公网/外网可用端口】(回车默认 10086): " OUT_PORT
         OUT_PORT=${OUT_PORT:-10086}
-        if ! is_valid_port "$OUT_PORT"; then
-            echo -e "${RED}❌ 公网端口无效！${RESET}"
-            pause
-            return
-        fi
-
+        is_valid_port "$OUT_PORT" || { echo -e "${RED}❌ 公网端口无效！${RESET}"; pause; return; }
         read -p "👉 2. 请输入【内网监听端口】(回车默认与外网一致: $OUT_PORT): " IN_PORT
         IN_PORT=${IN_PORT:-$OUT_PORT}
-        if ! is_valid_port "$IN_PORT"; then
-            echo -e "${RED}❌ 内网监听端口无效！${RESET}"
-            pause
-            return
-        fi
-
-        if is_port_in_use "$IN_PORT"; then
-            echo -e "${RED}❌ 监听端口 ${IN_PORT} 已被占用，请更换！${RESET}"
-            pause
-            return
-        fi
-
+        is_valid_port "$IN_PORT" || { echo -e "${RED}❌ 内网监听端口无效！${RESET}"; pause; return; }
+        is_port_in_use "$IN_PORT" && { echo -e "${RED}❌ 监听端口 ${IN_PORT} 已被占用！${RESET}"; pause; return; }
         read -p "👉 3. 请输入商家【公网 IPv4 地址】(识别出: $DISPLAY_IP): " PUBLIC_IP
         PUBLIC_IP=${PUBLIC_IP:-$AUTO_IP}
-        if ! is_valid_ipv4 "$PUBLIC_IP"; then
-            echo -e "${RED}❌ 公网 IPv4 地址无效！${RESET}"
-            pause
-            return
-        fi
-
+        is_valid_ipv4 "$PUBLIC_IP" || { echo -e "${RED}❌ 公网 IPv4 地址无效！${RESET}"; pause; return; }
         echo -e "   ${GREEN}✅ NAT 节点配置完成 -> IP: ${PUBLIC_IP} | 内网端口: ${IN_PORT} | 外网端口: ${OUT_PORT}${RESET}"
-
     elif [ "$net_choice" = "2" ]; then
-        echo -e "${YELLOW}💡 提示: 独立 VPS 推荐使用 443 端口，但如被占用请换端口。${RESET}"
-
+        echo -e "${YELLOW}💡 提示: 独立 VPS 推荐使用 443 端口。${RESET}"
         read -p "👉 请输入你想使用的端口 (回车默认 443): " IN_PORT
         IN_PORT=${IN_PORT:-443}
-        if ! is_valid_port "$IN_PORT"; then
-            echo -e "${RED}❌ 端口无效！${RESET}"
-            pause
-            return
-        fi
-
-        if is_port_in_use "$IN_PORT"; then
-            echo -e "${RED}❌ 端口 ${IN_PORT} 已被占用，请更换！${RESET}"
-            pause
-            return
-        fi
-
+        is_valid_port "$IN_PORT" || { echo -e "${RED}❌ 端口无效！${RESET}"; pause; return; }
+        is_port_in_use "$IN_PORT" && { echo -e "${RED}❌ 端口 ${IN_PORT} 已被占用！${RESET}"; pause; return; }
         OUT_PORT=$IN_PORT
-
-        read -p "👉 请确认【公网 IPv4 地址】(识别出: $DISPLAY_IP，不对请手动输入): " PUBLIC_IP
+        read -p "👉 请确认【公网 IPv4 地址】(识别出: $DISPLAY_IP): " PUBLIC_IP
         PUBLIC_IP=${PUBLIC_IP:-$AUTO_IP}
-        if ! is_valid_ipv4 "$PUBLIC_IP"; then
-            echo -e "${RED}❌ 公网 IPv4 地址无效！${RESET}"
-            pause
-            return
-        fi
-
+        is_valid_ipv4 "$PUBLIC_IP" || { echo -e "${RED}❌ 公网 IPv4 地址无效！${RESET}"; pause; return; }
         echo -e "   ${GREEN}✅ VPS 节点配置完成 -> IP: ${PUBLIC_IP} | 端口: ${IN_PORT}${RESET}"
     else
-        echo -e "${RED}❌ 输入错误，请输入 1 或 2！${RESET}"
-        pause
-        return
+        echo -e "${RED}❌ 输入错误！${RESET}"; pause; return
     fi
-
-    if ! choose_and_generate_secret; then
-        pause
-        return
-    fi
-
+    choose_and_generate_secret || { pause; return; }
     write_config_file "$IN_PORT" "$SECRET"
-
     if start_mtg_service; then
         TG_LINK="tg://proxy?server=${PUBLIC_IP}&port=${OUT_PORT}&secret=${SECRET}"
         write_info_file "$IN_PORT" "$PUBLIC_IP" "$OUT_PORT" "$FAKE_DOMAIN" "$SECRET" "$TG_LINK"
-
         echo -e "\n${GREEN}✅ 部署成功！程序已在后台监听端口 ${IN_PORT}${RESET}"
         echo -e "当前服务状态: $(get_status)"
         echo -e "你的专属 TG 链接是：\n${YELLOW}${TG_LINK}${RESET}\n"
     else
-        echo -e "${RED}❌ 服务启动失败！请检查配置、端口占用或日志。${RESET}"
-        if command -v systemctl >/dev/null 2>&1; then
-            systemctl status mtg --no-pager -l
-        else
-            tail -n 30 "$LOG_FILE" 2>/dev/null
-        fi
+        echo -e "${RED}❌ 服务启动失败！${RESET}"
     fi
-
     pause
 }
 
 view_link() {
     clear
     echo -e "${CYAN}=========================================${RESET}"
-
     if [ -f "$INFO_FILE" ]; then
         IN_PORT=$(read_info_value IN_PORT)
         PUBLIC_IP=$(read_info_value PUBLIC_IP)
         OUT_PORT=$(read_info_value OUT_PORT)
         FAKE_DOMAIN=$(read_info_value FAKE_DOMAIN)
         TG_LINK=$(read_info_value TG_LINK)
-
         echo -e "当前服务状态:     $(get_status)"
         echo -e "当前内网监听端口: ${GREEN}${IN_PORT}${RESET}"
         echo -e "当前对外公网地址: ${GREEN}${PUBLIC_IP}:${OUT_PORT}${RESET}"
@@ -474,96 +308,50 @@ view_link() {
     else
         echo -e "${RED}未找到配置，请先安装！${RESET}"
     fi
-
     echo -e "${CYAN}=========================================${RESET}"
     pause
 }
 
 modify_config() {
     clear
-    if [ ! -f "$INFO_FILE" ]; then
-        echo -e "${RED}请先安装！${RESET}"
-        pause
-        return
-    fi
-
+    [ ! -f "$INFO_FILE" ] && { echo -e "${RED}请先安装！${RESET}"; pause; return; }
     IN_PORT=$(read_info_value IN_PORT)
     PUBLIC_IP=$(read_info_value PUBLIC_IP)
     OUT_PORT=$(read_info_value OUT_PORT)
     FAKE_DOMAIN=$(read_info_value FAKE_DOMAIN)
     SECRET=$(read_info_value SECRET)
-
     AUTO_IP=$(get_public_ip)
     DISPLAY_IP=${AUTO_IP:-"获取失败"}
-
     echo -e "${CYAN}--- 修改映射与配置信息 ---${RESET}"
-
     read -p "输入新【内网监听端口】 (回车保持 ${IN_PORT}): " NEW_IN
     NEW_IN=${NEW_IN:-$IN_PORT}
-    if ! is_valid_port "$NEW_IN"; then
-        echo -e "${RED}❌ 内网监听端口无效！${RESET}"
-        pause
-        return
-    fi
-
-    if [ "$NEW_IN" != "$IN_PORT" ] && is_port_in_use "$NEW_IN"; then
-        echo -e "${RED}❌ 端口 ${NEW_IN} 已被占用！${RESET}"
-        pause
-        return
-    fi
-
+    is_valid_port "$NEW_IN" || { echo -e "${RED}❌ 内网监听端口无效！${RESET}"; pause; return; }
+    [ "$NEW_IN" != "$IN_PORT" ] && is_port_in_use "$NEW_IN" && { echo -e "${RED}❌ 端口已被占用！${RESET}"; pause; return; }
     echo -e "${YELLOW}当前机器识别到的外部 IP 为: ${DISPLAY_IP}${RESET}"
     read -p "输入新【公网 IP】 (回车保持 ${PUBLIC_IP}): " NEW_IP
     NEW_IP=${NEW_IP:-$PUBLIC_IP}
-    if ! is_valid_ipv4 "$NEW_IP"; then
-        echo -e "${RED}❌ 公网 IP 格式无效！${RESET}"
-        pause
-        return
-    fi
-
+    is_valid_ipv4 "$NEW_IP" || { echo -e "${RED}❌ 公网 IP 格式无效！${RESET}"; pause; return; }
     read -p "输入新【公网端口】 (回车保持 ${OUT_PORT}): " NEW_OUT
     NEW_OUT=${NEW_OUT:-$OUT_PORT}
-    if ! is_valid_port "$NEW_OUT"; then
-        echo -e "${RED}❌ 公网端口无效！${RESET}"
-        pause
-        return
-    fi
-
+    is_valid_port "$NEW_OUT" || { echo -e "${RED}❌ 公网端口无效！${RESET}"; pause; return; }
     echo -e "当前伪装域名为: ${GREEN}${FAKE_DOMAIN}${RESET}"
     read -p "按 1 重新设置伪装域名，按回车保持不变: " change_domain
-    if [ "$change_domain" = "1" ]; then
-        if ! choose_and_generate_secret; then
-            pause
-            return
-        fi
-    fi
-
+    [ "$change_domain" = "1" ] && choose_and_generate_secret || true
     write_config_file "$NEW_IN" "$SECRET"
-
     if start_mtg_service; then
         TG_LINK="tg://proxy?server=${NEW_IP}&port=${NEW_OUT}&secret=${SECRET}"
         write_info_file "$NEW_IN" "$NEW_IP" "$NEW_OUT" "$FAKE_DOMAIN" "$SECRET" "$TG_LINK"
         echo -e "${GREEN}✅ 配置已更新并重启成功！${RESET}"
     else
-        echo -e "${RED}❌ 配置已写入，但服务启动失败！请检查日志。${RESET}"
+        echo -e "${RED}❌ 配置已写入，但服务启动失败！${RESET}"
     fi
-
     pause
 }
 
 start_service_manual() {
     clear
-    if [ ! -x "/usr/local/bin/mtg" ] || [ ! -f "$CONFIG_FILE" ]; then
-        echo -e "${RED}❌ 未检测到已安装的 mtg 或配置文件！${RESET}"
-        pause
-        return
-    fi
-
-    if start_mtg_service; then
-        echo -e "${GREEN}✅ 服务启动成功！${RESET}"
-    else
-        echo -e "${RED}❌ 服务启动失败！${RESET}"
-    fi
+    [ ! -x "/usr/local/bin/mtg" ] || [ ! -f "$CONFIG_FILE" ] && { echo -e "${RED}❌ 未检测到已安装的 mtg！${RESET}"; pause; return; }
+    start_mtg_service && echo -e "${GREEN}✅ 服务启动成功！${RESET}" || echo -e "${RED}❌ 服务启动失败！${RESET}"
     pause
 }
 
@@ -576,17 +364,8 @@ stop_service_manual() {
 
 restart_service_manual() {
     clear
-    if [ ! -x "/usr/local/bin/mtg" ] || [ ! -f "$CONFIG_FILE" ]; then
-        echo -e "${RED}❌ 未检测到已安装的 mtg 或配置文件！${RESET}"
-        pause
-        return
-    fi
-
-    if start_mtg_service; then
-        echo -e "${GREEN}✅ 服务重启成功！${RESET}"
-    else
-        echo -e "${RED}❌ 服务重启失败！${RESET}"
-    fi
+    [ ! -x "/usr/local/bin/mtg" ] || [ ! -f "$CONFIG_FILE" ] && { echo -e "${RED}❌ 未检测到已安装的 mtg！${RESET}"; pause; return; }
+    start_mtg_service && echo -e "${GREEN}✅ 服务重启成功！${RESET}" || echo -e "${RED}❌ 服务重启失败！${RESET}"
     pause
 }
 
@@ -595,13 +374,11 @@ view_logs() {
     echo -e "${CYAN}=========================================${RESET}"
     echo -e "               📜 MTP 运行日志"
     echo -e "${CYAN}=========================================${RESET}"
-
     if command -v systemctl >/dev/null 2>&1; then
         journalctl -u mtg --no-pager -n 50 2>/dev/null || echo "暂无日志"
     else
         tail -n 50 "$LOG_FILE" 2>/dev/null || echo "暂无日志"
     fi
-
     echo -e "${CYAN}=========================================${RESET}"
     pause
 }
@@ -610,14 +387,8 @@ uninstall_mtp() {
     clear
     echo -e "${RED}你正在执行 MTP 卸载操作！${RESET}"
     read -p "确认彻底卸载 mtg + 面板吗？[y/N]: " confirm_uninstall
-    if [[ "$confirm_uninstall" != "y" && "$confirm_uninstall" != "Y" ]]; then
-        echo -e "${YELLOW}已取消卸载。${RESET}"
-        sleep 1
-        return
-    fi
-
+    [[ "$confirm_uninstall" != "y" && "$confirm_uninstall" != "Y" ]] && { echo -e "${YELLOW}已取消卸载。${RESET}"; sleep 1; return; }
     echo -e "${RED}正在卸载...${RESET}"
-
     if command -v systemctl >/dev/null 2>&1; then
         systemctl stop mtg >/dev/null 2>&1
         systemctl disable mtg >/dev/null 2>&1
@@ -627,10 +398,8 @@ uninstall_mtp() {
         pkill -f "/usr/local/bin/mtg run" 2>/dev/null
         crontab -l 2>/dev/null | grep -v "/usr/local/bin/mtg run" | crontab -
     fi
-
     rm -f /usr/local/bin/mtg "$CONFIG_FILE" "$INFO_FILE" /usr/local/bin/mtp "$LOG_FILE"
-
-    echo -e "${GREEN}✅ 卸载完成！面板即将自动关闭...${RESET}"
+    echo -e "${GREEN}✅ 卸载完成！${RESET}"
     sleep 2
     exit 0
 }
@@ -638,40 +407,34 @@ uninstall_mtp() {
 update_script() {
     clear
     echo -e "${YELLOW}正在从 GitHub 拉取最新面板代码...${RESET}"
-
     local tmp_file
     tmp_file=$(mktemp)
-
-    if curl -fsSL --connect-timeout 10 "${SCRIPT_URL}" -o "$tmp_file"; then
+    if curl -fsSL --connect-timeout 10 "${SCRIPT_URL}" -o "$tmp_file" 2>/dev/null; then
         if bash -n "$tmp_file" 2>/dev/null; then
             mv "$tmp_file" /usr/local/bin/mtp
             chmod +x /usr/local/bin/mtp
             echo -e "${GREEN}✅ 面板更新完成！请重新输入 mtp 启动最新版。${RESET}"
+            sleep 2
+            exit 0
         else
             rm -f "$tmp_file"
             echo -e "${RED}❌ 新脚本语法校验失败，已取消更新！${RESET}"
+            sleep 2
         fi
     else
         rm -f "$tmp_file"
         echo -e "${RED}❌ 下载失败，请检查网络！${RESET}"
+        sleep 2
     fi
-
-    sleep 2
-    exit 0
+    pause
 }
 
-# 首次安装快捷命令
 if [ ! -f "/usr/local/bin/mtp" ]; then
-    if curl -fsSL --connect-timeout 10 "${SCRIPT_URL}" -o /usr/local/bin/mtp 2>/dev/null; then
-        chmod +x /usr/local/bin/mtp
-    fi
+    curl -fsSL --connect-timeout 10 "${SCRIPT_URL}" -o /usr/local/bin/mtp 2>/dev/null && chmod +x /usr/local/bin/mtp
 fi
-
-# ================= 主菜单 =================
 
 while true; do
     clear
-
     if [ -f "$INFO_FILE" ]; then
         CURRENT_NODE_NAME=$(read_info_value NODE_NAME)
         CURRENT_PUBLIC_IP=$(read_info_value PUBLIC_IP)
@@ -682,7 +445,6 @@ while true; do
         CURRENT_PUBLIC_IP="-"
         CURRENT_OUT_PORT="-"
     fi
-
     echo -e "${CYAN}=========================================${RESET}"
     echo -e "   🦇 MTP 代理管理面板 ${GREEN}${SCRIPT_VERSION}${RESET}"
     echo -e "${CYAN}=========================================${RESET}"
@@ -705,7 +467,6 @@ while true; do
     echo -e "  ${YELLOW}00.${RESET} 返回主菜单 (NooMili)"
     echo -e "${CYAN}=========================================${RESET}"
     read -p "请输入序号选择功能: " choice
-
     case "$choice" in
         1) install_mtp ;;
         2) view_link ;;
@@ -717,17 +478,10 @@ while true; do
         8) uninstall_mtp ;;
         9) update_script ;;
         0) clear; exit 0 ;;
-        00)
-            if [ -f "/usr/local/bin/n" ]; then
-                exec /usr/local/bin/n
-            else
-                echo -e "${RED}未安装主控！请先运行主控安装命令。${RESET}"
-                sleep 2
-            fi
-            ;;
-        *)
-            echo -e "${RED}输入错误！${RESET}"
-            sleep 1
-            ;;
+        00) [ -f "/usr/local/bin/n" ] && exec /usr/local/bin/n || { echo -e "${RED}未安装主控！${RESET}"; sleep 2; } ;;
+        *) echo -e "${RED}输入错误！${RESET}"; sleep 1 ;;
     esac
 done
+EOFMTP
+
+chmod +x /usr/local/bin/mtp
