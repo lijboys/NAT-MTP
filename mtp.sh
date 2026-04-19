@@ -3,7 +3,7 @@ cat > /usr/local/bin/mtp <<'EOFMTP'
 
 # ============================================
 # MTP 代理管理面板
-# Version: v1.2.2
+# Version: v1.2.3
 # ============================================
 
 GREEN="\033[32m"
@@ -13,7 +13,7 @@ CYAN="\033[36m"
 BLUE="\033[34m"
 RESET="\033[0m"
 
-SCRIPT_VERSION="v1.2.2"
+SCRIPT_VERSION="v1.2.3"
 MTG_VERSION="2.1.7"
 
 CONFIG_FILE="/etc/mtg.toml"
@@ -21,6 +21,7 @@ INFO_FILE="/etc/mtg_info.txt"
 SERVICE_FILE="/etc/systemd/system/mtg.service"
 LOG_FILE="/var/log/mtg.log"
 GUARD_FILE="/usr/local/bin/mtg_guard.sh"
+GUARD_LOG="/var/log/mtg_guard.log"
 
 SCRIPT_URL="https://raw.githubusercontent.com/lijboys/SSHTools/main/mtp.sh"
 
@@ -36,7 +37,7 @@ pause() {
 # ================= 基础检测 =================
 check_dependencies() {
     local missing=()
-    for cmd in curl tar grep awk sed pgrep; do
+    for cmd in curl tar grep awk sed pgrep ss; do
         command -v "$cmd" >/dev/null 2>&1 || missing+=("$cmd")
     done
     [ ${#missing[@]} -gt 0 ] && { echo -e "${RED}❌ 缺少依赖: ${missing[*]}${RESET}"; return 1; }
@@ -106,7 +107,7 @@ bind-to = "0.0.0.0:${in_port}"
 EOT
 }
 
-# ================= 增强守护启动（无 systemd 专用） =================
+# ================= 守护脚本 =================
 create_guard_script() {
     cat > "$GUARD_FILE" <<'EOF'
 #!/bin/sh
@@ -119,6 +120,28 @@ EOF
     chmod +x "$GUARD_FILE"
 }
 
+# ================= 增强停止（解决重装时端口占用） =================
+stop_mtg_service() {
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl stop mtg >/dev/null 2>&1
+    else
+        pkill -9 -f "/usr/local/bin/mtg_guard.sh" 2>/dev/null || true
+        pkill -9 -f "mtg run" 2>/dev/null || true
+        sleep 2
+        # 等待端口彻底释放（最多等 8 秒）
+        if [ -f "$CONFIG_FILE" ]; then
+            local port=$(grep -o 'bind-to = "0.0.0.0:[0-9]*"' "$CONFIG_FILE" | cut -d: -f2 | tr -d '"')
+            for i in {1..8}; do
+                if ! is_port_in_use "$port"; then
+                    break
+                fi
+                sleep 1
+            done
+        fi
+    fi
+}
+
+# ================= 启动（无 systemd 使用 guard） =================
 start_mtg_service() {
     if command -v systemctl >/dev/null 2>&1; then
         mkdir -p /etc/systemd/system/
@@ -140,12 +163,11 @@ EOT
         sleep 1
         systemctl is-active --quiet mtg && return 0 || return 1
     else
-        # 无 systemd：使用 guard 守护
-        pkill -f "/usr/local/bin/mtg run" 2>/dev/null
-        pkill -f "/usr/local/bin/mtg_guard.sh" 2>/dev/null
+        pkill -9 -f "/usr/local/bin/mtg_guard.sh" 2>/dev/null || true
+        pkill -9 -f "mtg run" 2>/dev/null || true
         [ ! -f "$GUARD_FILE" ] && create_guard_script
         nohup setsid "$GUARD_FILE" >/dev/null 2>&1 </dev/null &
-        sleep 1
+        sleep 2
         if pgrep -f "/usr/local/bin/mtg_guard.sh" >/dev/null 2>&1; then
             (
                 crontab -l 2>/dev/null | grep -v -E "mtg_guard.sh|mtg run ${CONFIG_FILE}"
@@ -155,15 +177,6 @@ EOT
             return 0
         fi
         return 1
-    fi
-}
-
-stop_mtg_service() {
-    if command -v systemctl >/dev/null 2>&1; then
-        systemctl stop mtg >/dev/null 2>&1
-    else
-        pkill -f "/usr/local/bin/mtg_guard.sh" 2>/dev/null
-        pkill -f "/usr/local/bin/mtg run" 2>/dev/null
     fi
 }
 
@@ -220,7 +233,7 @@ choose_and_generate_secret() {
     return 0
 }
 
-# ================= 业务功能（保持你原来逻辑） =================
+# ================= 业务功能 =================
 install_mtp() {
     clear
     echo -e "${CYAN}=========================================${RESET}"
@@ -282,8 +295,6 @@ install_mtp() {
     fi
     pause
 }
-
-# （view_link、modify_config、start_service_manual、stop_service_manual、restart_service_manual、view_logs、uninstall_mtp、update_script 全部保留你原来的逻辑，仅稍作精简以确保语法正确）
 
 view_link() {
     clear
@@ -373,7 +384,7 @@ view_logs() {
         journalctl -u mtg --no-pager -n 50 2>/dev/null || echo "暂无日志"
     else
         tail -n 50 "$LOG_FILE" 2>/dev/null || echo "暂无日志"
-        [ -f "/var/log/mtg_guard.log" ] && echo -e "\n${YELLOW}守护日志：${RESET}" && tail -n 10 /var/log/mtg_guard.log
+        [ -f "$GUARD_LOG" ] && echo -e "\n${YELLOW}守护日志：${RESET}" && tail -n 15 "$GUARD_LOG"
     fi
     echo -e "${CYAN}=========================================${RESET}"
     pause
@@ -391,11 +402,11 @@ uninstall_mtp() {
         rm -f "$SERVICE_FILE"
         systemctl daemon-reload
     else
-        pkill -f "/usr/local/bin/mtg_guard.sh" 2>/dev/null
-        pkill -f "/usr/local/bin/mtg run" 2>/dev/null
+        pkill -9 -f "/usr/local/bin/mtg_guard.sh" 2>/dev/null
+        pkill -9 -f "mtg run" 2>/dev/null
         crontab -l 2>/dev/null | grep -v -E "mtg_guard.sh|mtg run ${CONFIG_FILE}" | crontab -
     fi
-    rm -f /usr/local/bin/mtg "$CONFIG_FILE" "$INFO_FILE" /usr/local/bin/mtp "$LOG_FILE" "$GUARD_FILE" /var/log/mtg_guard.log
+    rm -f /usr/local/bin/mtg "$CONFIG_FILE" "$INFO_FILE" /usr/local/bin/mtp "$LOG_FILE" "$GUARD_FILE" "$GUARD_LOG"
     echo -e "${GREEN}✅ 卸载完成！${RESET}"
     sleep 2
     exit 0
@@ -485,3 +496,5 @@ done
 EOFMTP
 
 chmod +x /usr/local/bin/mtp
+echo -e "${GREEN}✅ v1.2.3 已安装完成！${RESET}"
+echo -e "现在执行 ${CYAN}mtp${RESET} 进入面板，选择 1 重装即可（端口不会再被占用）。"
