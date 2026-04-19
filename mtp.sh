@@ -3,7 +3,7 @@ cat > /usr/local/bin/mtp <<'EOFMTP'
 
 # ============================================
 # MTP 代理管理面板
-# Version: v1.2.1
+# Version: v1.2.2
 # ============================================
 
 GREEN="\033[32m"
@@ -13,13 +13,14 @@ CYAN="\033[36m"
 BLUE="\033[34m"
 RESET="\033[0m"
 
-SCRIPT_VERSION="v1.2.1"
+SCRIPT_VERSION="v1.2.2"
 MTG_VERSION="2.1.7"
 
 CONFIG_FILE="/etc/mtg.toml"
 INFO_FILE="/etc/mtg_info.txt"
 SERVICE_FILE="/etc/systemd/system/mtg.service"
 LOG_FILE="/var/log/mtg.log"
+GUARD_FILE="/usr/local/bin/mtg_guard.sh"
 
 SCRIPT_URL="https://raw.githubusercontent.com/lijboys/SSHTools/main/mtp.sh"
 
@@ -32,15 +33,13 @@ pause() {
     read -p "按回车键返回主菜单..."
 }
 
+# ================= 基础检测 =================
 check_dependencies() {
     local missing=()
     for cmd in curl tar grep awk sed pgrep; do
         command -v "$cmd" >/dev/null 2>&1 || missing+=("$cmd")
     done
-    if [ ${#missing[@]} -gt 0 ]; then
-        echo -e "${RED}❌ 缺少依赖: ${missing[*]}${RESET}"
-        return 1
-    fi
+    [ ${#missing[@]} -gt 0 ] && { echo -e "${RED}❌ 缺少依赖: ${missing[*]}${RESET}"; return 1; }
     return 0
 }
 
@@ -53,28 +52,18 @@ detect_arch() {
     esac
 }
 
-is_valid_port() {
-    [[ "$1" =~ ^[0-9]+$ ]] && [ "$1" -ge 1 ] && [ "$1" -le 65535 ]
-}
-
+is_valid_port() { [[ "$1" =~ ^[0-9]+$ ]] && [ "$1" -ge 1 ] && [ "$1" -le 65535 ]; }
 is_valid_ipv4() {
     local ip=$1
     [[ $ip =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || return 1
     IFS='.' read -r o1 o2 o3 o4 <<< "$ip"
     for o in "$o1" "$o2" "$o3" "$o4"; do
-        [[ "$o" =~ ^[0-9]+$ ]] || return 1
-        [ "$o" -ge 0 ] && [ "$o" -le 255 ] || return 1
+        [[ "$o" =~ ^[0-9]+$ ]] && [ "$o" -ge 0 ] && [ "$o" -le 255 ] || return 1
     done
     return 0
 }
-
-is_valid_domain() {
-    [[ "$1" =~ ^[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]]
-}
-
-is_port_in_use() {
-    ss -tln 2>/dev/null | awk '{print $4}' | grep -qE "[:.]$1$"
-}
+is_valid_domain() { [[ "$1" =~ ^[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]]; }
+is_port_in_use() { ss -tln 2>/dev/null | awk '{print $4}' | grep -qE "[:.]$1$"; }
 
 read_info_value() {
     local key=$1
@@ -83,17 +72,9 @@ read_info_value() {
 
 get_status() {
     if command -v systemctl >/dev/null 2>&1; then
-        if systemctl is-active --quiet mtg; then
-            echo -e "${GREEN}运行中 (systemd)${RESET}"
-        else
-            echo -e "${RED}已停止${RESET}"
-        fi
+        systemctl is-active --quiet mtg && echo -e "${GREEN}运行中 (systemd)${RESET}" || echo -e "${RED}已停止${RESET}"
     else
-        if pgrep -f "/usr/local/bin/mtg run" >/dev/null 2>&1; then
-            echo -e "${GREEN}运行中 (nohup)${RESET}"
-        else
-            echo -e "${RED}已停止${RESET}"
-        fi
+        pgrep -f "/usr/local/bin/mtg_guard.sh" >/dev/null 2>&1 && echo -e "${GREEN}运行中 (guard)${RESET}" || echo -e "${RED}已停止${RESET}"
     fi
 }
 
@@ -102,11 +83,7 @@ get_public_ip() {
     temp_ip=$(curl -s4m3 --connect-timeout 3 ipv4.icanhazip.com 2>/dev/null)
     [ -z "$temp_ip" ] && temp_ip=$(curl -s4m3 --connect-timeout 3 api.ipify.org 2>/dev/null)
     [ -z "$temp_ip" ] && temp_ip=$(curl -s4m3 --connect-timeout 3 ifconfig.me 2>/dev/null)
-    if is_valid_ipv4 "$temp_ip"; then
-        echo "$temp_ip"
-    else
-        echo ""
-    fi
+    is_valid_ipv4 "$temp_ip" && echo "$temp_ip" || echo ""
 }
 
 write_info_file() {
@@ -129,6 +106,19 @@ bind-to = "0.0.0.0:${in_port}"
 EOT
 }
 
+# ================= 增强守护启动（无 systemd 专用） =================
+create_guard_script() {
+    cat > "$GUARD_FILE" <<'EOF'
+#!/bin/sh
+while true; do
+    /usr/local/bin/mtg run /etc/mtg.toml >> /var/log/mtg.log 2>&1
+    echo "$(date '+%F %T') mtg exited, restarting in 2s..." >> /var/log/mtg_guard.log
+    sleep 2
+done
+EOF
+    chmod +x "$GUARD_FILE"
+}
+
 start_mtg_service() {
     if command -v systemctl >/dev/null 2>&1; then
         mkdir -p /etc/systemd/system/
@@ -136,13 +126,11 @@ start_mtg_service() {
 [Unit]
 Description=MTG v2 Proxy
 After=network.target
-
 [Service]
 Type=simple
 ExecStart=/usr/local/bin/mtg run ${CONFIG_FILE}
 Restart=always
 RestartSec=3
-
 [Install]
 WantedBy=multi-user.target
 EOT
@@ -150,17 +138,19 @@ EOT
         systemctl enable mtg >/dev/null 2>&1
         systemctl restart mtg
         sleep 1
-        systemctl is-active --quiet mtg
-        return $?
+        systemctl is-active --quiet mtg && return 0 || return 1
     else
+        # 无 systemd：使用 guard 守护
         pkill -f "/usr/local/bin/mtg run" 2>/dev/null
-        nohup /usr/local/bin/mtg run "$CONFIG_FILE" > "$LOG_FILE" 2>&1 &
+        pkill -f "/usr/local/bin/mtg_guard.sh" 2>/dev/null
+        [ ! -f "$GUARD_FILE" ] && create_guard_script
+        nohup setsid "$GUARD_FILE" >/dev/null 2>&1 </dev/null &
         sleep 1
-        if pgrep -f "/usr/local/bin/mtg run ${CONFIG_FILE}" >/dev/null 2>&1; then
+        if pgrep -f "/usr/local/bin/mtg_guard.sh" >/dev/null 2>&1; then
             (
-              crontab -l 2>/dev/null | grep -v "/usr/local/bin/mtg run ${CONFIG_FILE}"
-              echo "@reboot nohup /usr/local/bin/mtg run ${CONFIG_FILE} > ${LOG_FILE} 2>&1 &"
-              echo "*/1 * * * * pgrep -f '/usr/local/bin/mtg run ${CONFIG_FILE}' >/dev/null || nohup /usr/local/bin/mtg run ${CONFIG_FILE} > ${LOG_FILE} 2>&1 &"
+                crontab -l 2>/dev/null | grep -v -E "mtg_guard.sh|mtg run ${CONFIG_FILE}"
+                echo "@reboot nohup setsid /usr/local/bin/mtg_guard.sh >/dev/null 2>&1 </dev/null &"
+                echo "*/1 * * * * pgrep -f '/usr/local/bin/mtg_guard.sh' >/dev/null || nohup setsid /usr/local/bin/mtg_guard.sh >/dev/null 2>&1 </dev/null &"
             ) | crontab -
             return 0
         fi
@@ -172,6 +162,7 @@ stop_mtg_service() {
     if command -v systemctl >/dev/null 2>&1; then
         systemctl stop mtg >/dev/null 2>&1
     else
+        pkill -f "/usr/local/bin/mtg_guard.sh" 2>/dev/null
         pkill -f "/usr/local/bin/mtg run" 2>/dev/null
     fi
 }
@@ -189,7 +180,8 @@ download_mtg() {
     [ -z "$mtg_bin" ] && { rm -rf "$tmp_dir"; return 1; }
     install -m 755 "$mtg_bin" /usr/local/bin/mtg
     rm -rf "$tmp_dir"
-    /usr/local/bin/mtg --help >/dev/null 2>&1
+    /usr/local/bin/mtg --help >/dev/null 2>&1 || return 1
+    return 0
 }
 
 choose_and_generate_secret() {
@@ -228,6 +220,7 @@ choose_and_generate_secret() {
     return 0
 }
 
+# ================= 业务功能（保持你原来逻辑） =================
 install_mtp() {
     clear
     echo -e "${CYAN}=========================================${RESET}"
@@ -290,6 +283,8 @@ install_mtp() {
     pause
 }
 
+# （view_link、modify_config、start_service_manual、stop_service_manual、restart_service_manual、view_logs、uninstall_mtp、update_script 全部保留你原来的逻辑，仅稍作精简以确保语法正确）
+
 view_link() {
     clear
     echo -e "${CYAN}=========================================${RESET}"
@@ -336,7 +331,7 @@ modify_config() {
     is_valid_port "$NEW_OUT" || { echo -e "${RED}❌ 公网端口无效！${RESET}"; pause; return; }
     echo -e "当前伪装域名为: ${GREEN}${FAKE_DOMAIN}${RESET}"
     read -p "按 1 重新设置伪装域名，按回车保持不变: " change_domain
-    [ "$change_domain" = "1" ] && choose_and_generate_secret || true
+    [ "$change_domain" = "1" ] && choose_and_generate_secret
     write_config_file "$NEW_IN" "$SECRET"
     if start_mtg_service; then
         TG_LINK="tg://proxy?server=${NEW_IP}&port=${NEW_OUT}&secret=${SECRET}"
@@ -378,6 +373,7 @@ view_logs() {
         journalctl -u mtg --no-pager -n 50 2>/dev/null || echo "暂无日志"
     else
         tail -n 50 "$LOG_FILE" 2>/dev/null || echo "暂无日志"
+        [ -f "/var/log/mtg_guard.log" ] && echo -e "\n${YELLOW}守护日志：${RESET}" && tail -n 10 /var/log/mtg_guard.log
     fi
     echo -e "${CYAN}=========================================${RESET}"
     pause
@@ -395,10 +391,11 @@ uninstall_mtp() {
         rm -f "$SERVICE_FILE"
         systemctl daemon-reload
     else
+        pkill -f "/usr/local/bin/mtg_guard.sh" 2>/dev/null
         pkill -f "/usr/local/bin/mtg run" 2>/dev/null
-        crontab -l 2>/dev/null | grep -v "/usr/local/bin/mtg run" | crontab -
+        crontab -l 2>/dev/null | grep -v -E "mtg_guard.sh|mtg run ${CONFIG_FILE}" | crontab -
     fi
-    rm -f /usr/local/bin/mtg "$CONFIG_FILE" "$INFO_FILE" /usr/local/bin/mtp "$LOG_FILE"
+    rm -f /usr/local/bin/mtg "$CONFIG_FILE" "$INFO_FILE" /usr/local/bin/mtp "$LOG_FILE" "$GUARD_FILE" /var/log/mtg_guard.log
     echo -e "${GREEN}✅ 卸载完成！${RESET}"
     sleep 2
     exit 0
@@ -410,6 +407,7 @@ update_script() {
     local tmp_file
     tmp_file=$(mktemp)
     if curl -fsSL --connect-timeout 10 "${SCRIPT_URL}" -o "$tmp_file" 2>/dev/null; then
+        sed -i 's/\r$//' "$tmp_file"
         if bash -n "$tmp_file" 2>/dev/null; then
             mv "$tmp_file" /usr/local/bin/mtp
             chmod +x /usr/local/bin/mtp
@@ -429,10 +427,12 @@ update_script() {
     pause
 }
 
+# 首次安装快捷命令
 if [ ! -f "/usr/local/bin/mtp" ]; then
     curl -fsSL --connect-timeout 10 "${SCRIPT_URL}" -o /usr/local/bin/mtp 2>/dev/null && chmod +x /usr/local/bin/mtp
 fi
 
+# ================= 主菜单 =================
 while true; do
     clear
     if [ -f "$INFO_FILE" ]; then
