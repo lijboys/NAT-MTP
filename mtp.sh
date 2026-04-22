@@ -3,7 +3,8 @@ cat > /usr/local/bin/mtp <<'EOFMTP'
 
 # ============================================
 # MTP 代理管理面板
-# Version: v1.2.3
+# Version: v1.2.4
+# 支持: Debian/Ubuntu/CentOS/Alpine
 # ============================================
 
 GREEN="\033[32m"
@@ -13,7 +14,7 @@ CYAN="\033[36m"
 BLUE="\033[34m"
 RESET="\033[0m"
 
-SCRIPT_VERSION="v1.2.3"
+SCRIPT_VERSION="v1.2.4"
 MTG_VERSION="2.1.7"
 
 CONFIG_FILE="/etc/mtg.toml"
@@ -22,6 +23,7 @@ SERVICE_FILE="/etc/systemd/system/mtg.service"
 LOG_FILE="/var/log/mtg.log"
 GUARD_FILE="/usr/local/bin/mtg_guard.sh"
 GUARD_LOG="/var/log/mtg_guard.log"
+INIT_FILE="/etc/init.d/mtg"
 
 SCRIPT_URL="https://raw.githubusercontent.com/lijboys/SSHTools/main/mtp.sh"
 
@@ -34,15 +36,75 @@ pause() {
     read -p "按回车键返回主菜单..."
 }
 
-# ================= 基础检测 =================
-check_dependencies() {
-    local missing=()
-    for cmd in curl tar grep awk sed pgrep ss; do
-        command -v "$cmd" >/dev/null 2>&1 || missing+=("$cmd")
-    done
-    [ ${#missing[@]} -gt 0 ] && { echo -e "${RED}❌ 缺少依赖: ${missing[*]}${RESET}"; return 1; }
-    return 0
+# ================= 系统检测 =================
+
+detect_os() {
+  if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    echo "$ID"
+  else
+    echo "unknown"
+  fi
 }
+
+detect_pkg_manager() {
+  if command -v apk >/dev/null 2>&1; then
+    echo "apk"
+  elif command -v apt >/dev/null 2>&1; then
+    echo "apt"
+  elif command -v dnf >/dev/null 2>&1; then
+    echo "dnf"
+  elif command -v yum >/dev/null 2>&1; then
+    echo "yum"
+  else
+    echo "unknown"
+  fi
+}
+
+# ================= 依赖检测与安装 =================
+
+check_and_install_deps() {
+  local pkg_mgr=$(detect_pkg_manager)
+  local missing_deps=()
+  
+  for cmd in curl tar grep awk sed pgrep ss; do
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+      missing_deps+=("$cmd")
+    fi
+  done
+  
+  if [ ${#missing_deps[@]} -eq 0 ]; then
+    return 0
+  fi
+  
+  echo -e "${YELLOW}检测到缺少依赖: ${missing_deps[*]}${RESET}"
+  echo -e "${YELLOW}正在自动安装...${RESET}"
+  
+  case "$pkg_mgr" in
+    apk)
+      apk add --no-cache curl tar grep gawk sed procps iproute2 openssl >/dev/null 2>&1
+      ;;
+    apt)
+      apt update -y >/dev/null 2>&1
+      apt install -y curl tar grep gawk sed procps iproute2 openssl >/dev/null 2>&1
+      ;;
+    dnf)
+      dnf install -y curl tar grep gawk sed procps-ng iproute-tc openssl >/dev/null 2>&1
+      ;;
+    yum)
+      yum install -y curl tar grep gawk sed procps iproute openssl >/dev/null 2>&1
+      ;;
+    *)
+      echo -e "${RED}❌ 无法识别包管理器，请手动安装: ${missing_deps[*]}${RESET}"
+      return 1
+      ;;
+  esac
+  
+  echo -e "${GREEN}✅ 依赖安装完成${RESET}"
+  return 0
+}
+
+# ================= 基础检测 =================
 
 detect_arch() {
     case "$(uname -m)" in
@@ -73,7 +135,9 @@ read_info_value() {
 
 get_status() {
     if command -v systemctl >/dev/null 2>&1; then
-        systemctl is-active --quiet mtg && echo -e "${GREEN}运行中 (systemd)${RESET}" || echo -e "${RED}已停止${RESET}"
+        systemctl is-active --quiet mtg 2>/dev/null && echo -e "${GREEN}运行中 (systemd)${RESET}" || echo -e "${RED}已停止${RESET}"
+    elif command -v rc-service >/dev/null 2>&1; then
+        rc-service mtg status >/dev/null 2>&1 && echo -e "${GREEN}运行中 (OpenRC)${RESET}" || echo -e "${RED}已停止${RESET}"
     else
         pgrep -f "/usr/local/bin/mtg_guard.sh" >/dev/null 2>&1 && echo -e "${GREEN}运行中 (guard)${RESET}" || echo -e "${RED}已停止${RESET}"
     fi
@@ -122,27 +186,35 @@ EOF
 
 # ================= 增强停止（解决重装时端口占用） =================
 stop_mtg_service() {
+    local os=$(detect_os)
+    
     if command -v systemctl >/dev/null 2>&1; then
         systemctl stop mtg >/dev/null 2>&1
+    elif [ "$os" = "alpine" ] && command -v rc-service >/dev/null 2>&1; then
+        rc-service mtg stop >/dev/null 2>&1
     else
         pkill -9 -f "/usr/local/bin/mtg_guard.sh" 2>/dev/null || true
         pkill -9 -f "mtg run" 2>/dev/null || true
-        sleep 2
-        # 等待端口彻底释放（最多等 8 秒）
-        if [ -f "$CONFIG_FILE" ]; then
-            local port=$(grep -o 'bind-to = "0.0.0.0:[0-9]*"' "$CONFIG_FILE" | cut -d: -f2 | tr -d '"')
-            for i in {1..8}; do
-                if ! is_port_in_use "$port"; then
-                    break
-                fi
-                sleep 1
-            done
-        fi
+    fi
+    
+    sleep 2
+    
+    # 等待端口彻底释放（最多等 8 秒）
+    if [ -f "$CONFIG_FILE" ]; then
+        local port=$(grep -o 'bind-to = "0.0.0.0:[0-9]*"' "$CONFIG_FILE" | cut -d: -f2 | tr -d '"')
+        for i in {1..8}; do
+            if ! is_port_in_use "$port"; then
+                break
+            fi
+            sleep 1
+        done
     fi
 }
 
-# ================= 启动（无 systemd 使用 guard） =================
+# ================= 启动（自适应 systemd/OpenRC/guard） =================
 start_mtg_service() {
+    local os=$(detect_os)
+    
     if command -v systemctl >/dev/null 2>&1; then
         mkdir -p /etc/systemd/system/
         cat > "$SERVICE_FILE" <<EOT
@@ -162,7 +234,46 @@ EOT
         systemctl restart mtg
         sleep 1
         systemctl is-active --quiet mtg && return 0 || return 1
+    elif [ "$os" = "alpine" ] && command -v rc-service >/dev/null 2>&1; then
+        # Alpine OpenRC 服务
+        cat > "$INIT_FILE" <<'INIT'
+#!/sbin/openrc-run
+
+description="MTG v2 Proxy"
+command="/usr/local/bin/mtg"
+command_args="run /etc/mtg.toml"
+pidfile="/var/run/mtg.pid"
+logfile="/var/log/mtg.log"
+
+depend() {
+  need net
+}
+
+start_pre() {
+  mkdir -p /var/log
+  touch "$logfile"
+}
+
+start() {
+  ebegin "Starting MTG"
+  start-stop-daemon --start --quiet --pidfile "$pidfile" \
+    --exec "$command" -- $command_args >> "$logfile" 2>&1 &
+  eend $?
+}
+
+stop() {
+  ebegin "Stopping MTG"
+  start-stop-daemon --stop --quiet --pidfile "$pidfile"
+  eend $?
+}
+INIT
+        chmod +x "$INIT_FILE"
+        rc-update add mtg >/dev/null 2>&1
+        rc-service mtg restart >/dev/null 2>&1
+        sleep 1
+        rc-service mtg status >/dev/null 2>&1 && return 0 || return 1
     else
+        # 使用守护脚本
         pkill -9 -f "/usr/local/bin/mtg_guard.sh" 2>/dev/null || true
         pkill -9 -f "mtg run" 2>/dev/null || true
         [ ! -f "$GUARD_FILE" ] && create_guard_script
@@ -173,7 +284,7 @@ EOT
                 crontab -l 2>/dev/null | grep -v -E "mtg_guard.sh|mtg run ${CONFIG_FILE}"
                 echo "@reboot nohup setsid /usr/local/bin/mtg_guard.sh >/dev/null 2>&1 </dev/null &"
                 echo "*/1 * * * * pgrep -f '/usr/local/bin/mtg_guard.sh' >/dev/null || nohup setsid /usr/local/bin/mtg_guard.sh >/dev/null 2>&1 </dev/null &"
-            ) | crontab -
+            ) | crontab - 2>/dev/null
             return 0
         fi
         return 1
@@ -239,7 +350,9 @@ install_mtp() {
     echo -e "${CYAN}=========================================${RESET}"
     echo -e "${CYAN}  🚀 开始部署 mtg v2 伪装代理${RESET}"
     echo -e "${CYAN}=========================================${RESET}"
-    check_dependencies || { pause; return; }
+    
+    check_and_install_deps || { pause; return; }
+    
     if [ -f "/usr/local/bin/mtg" ] && [ -f "$INFO_FILE" ]; then
         echo -e "${YELLOW}⚠️ 检测到当前机器已经安装了 MTP 代理服务！${RESET}"
         read -p "👉 是否要继续【覆盖重装】并清除原有配置？[y/N]: " confirm_reinstall
@@ -394,107 +507,4 @@ uninstall_mtp() {
     clear
     echo -e "${RED}你正在执行 MTP 卸载操作！${RESET}"
     read -p "确认彻底卸载 mtg + 面板吗？[y/N]: " confirm_uninstall
-    [[ "$confirm_uninstall" != "y" && "$confirm_uninstall" != "Y" ]] && { echo -e "${YELLOW}已取消卸载。${RESET}"; sleep 1; return; }
-    echo -e "${RED}正在卸载...${RESET}"
-    if command -v systemctl >/dev/null 2>&1; then
-        systemctl stop mtg >/dev/null 2>&1
-        systemctl disable mtg >/dev/null 2>&1
-        rm -f "$SERVICE_FILE"
-        systemctl daemon-reload
-    else
-        pkill -9 -f "/usr/local/bin/mtg_guard.sh" 2>/dev/null
-        pkill -9 -f "mtg run" 2>/dev/null
-        crontab -l 2>/dev/null | grep -v -E "mtg_guard.sh|mtg run ${CONFIG_FILE}" | crontab -
-    fi
-    rm -f /usr/local/bin/mtg "$CONFIG_FILE" "$INFO_FILE" /usr/local/bin/mtp "$LOG_FILE" "$GUARD_FILE" "$GUARD_LOG"
-    echo -e "${GREEN}✅ 卸载完成！${RESET}"
-    sleep 2
-    exit 0
-}
-
-update_script() {
-    clear
-    echo -e "${YELLOW}正在从 GitHub 拉取最新面板代码...${RESET}"
-    local tmp_file
-    tmp_file=$(mktemp)
-    if curl -fsSL --connect-timeout 10 "${SCRIPT_URL}" -o "$tmp_file" 2>/dev/null; then
-        sed -i 's/\r$//' "$tmp_file"
-        if bash -n "$tmp_file" 2>/dev/null; then
-            mv "$tmp_file" /usr/local/bin/mtp
-            chmod +x /usr/local/bin/mtp
-            echo -e "${GREEN}✅ 面板更新完成！请重新输入 mtp 启动最新版。${RESET}"
-            sleep 2
-            exit 0
-        else
-            rm -f "$tmp_file"
-            echo -e "${RED}❌ 新脚本语法校验失败，已取消更新！${RESET}"
-            sleep 2
-        fi
-    else
-        rm -f "$tmp_file"
-        echo -e "${RED}❌ 下载失败，请检查网络！${RESET}"
-        sleep 2
-    fi
-    pause
-}
-
-# 首次安装快捷命令
-if [ ! -f "/usr/local/bin/mtp" ]; then
-    curl -fsSL --connect-timeout 10 "${SCRIPT_URL}" -o /usr/local/bin/mtp 2>/dev/null && chmod +x /usr/local/bin/mtp
-fi
-
-# ================= 主菜单 =================
-while true; do
-    clear
-    if [ -f "$INFO_FILE" ]; then
-        CURRENT_NODE_NAME=$(read_info_value NODE_NAME)
-        CURRENT_PUBLIC_IP=$(read_info_value PUBLIC_IP)
-        CURRENT_OUT_PORT=$(read_info_value OUT_PORT)
-        [ -z "$CURRENT_NODE_NAME" ] && CURRENT_NODE_NAME="未设置"
-    else
-        CURRENT_NODE_NAME="未安装"
-        CURRENT_PUBLIC_IP="-"
-        CURRENT_OUT_PORT="-"
-    fi
-    echo -e "${CYAN}=========================================${RESET}"
-    echo -e "   🦇 MTP 代理管理面板 ${GREEN}${SCRIPT_VERSION}${RESET}"
-    echo -e "${CYAN}=========================================${RESET}"
-    echo -e "当前状态: ${RESET}$(get_status)"
-    echo -e "节点备注: ${GREEN}${CURRENT_NODE_NAME}${RESET}"
-    echo -e "当前地址: ${YELLOW}${CURRENT_PUBLIC_IP}:${CURRENT_OUT_PORT}${RESET}"
-    echo -e "快捷指令: ${GREEN}mtp${RESET}"
-    echo -e "MTG版本:  ${YELLOW}v${MTG_VERSION}${RESET}"
-    echo -e "${CYAN}-----------------------------------------${RESET}"
-    echo -e "  ${GREEN}1.${RESET} 安装 / 重装 MTP (自动适配网络环境)"
-    echo -e "  ${GREEN}2.${RESET} 查看当前 TG 链接与信息"
-    echo -e "  ${GREEN}3.${RESET} 修改端口、IP、备注名与伪装域名"
-    echo -e "  ${YELLOW}4.${RESET} 启动 MTP 服务"
-    echo -e "  ${YELLOW}5.${RESET} 停止 MTP 服务"
-    echo -e "  ${CYAN}6.${RESET} 重启 MTP 服务"
-    echo -e "  ${CYAN}7.${RESET} 查看运行日志"
-    echo -e "  ${RED}8.${RESET} 彻底卸载 MTP"
-    echo -e "  ${BLUE}9.${RESET} 更新面板代码 (从 GitHub 同步)"
-    echo -e "  ${GREEN}0.${RESET} 退出面板"
-    echo -e "  ${YELLOW}00.${RESET} 返回主菜单 (NooMili)"
-    echo -e "${CYAN}=========================================${RESET}"
-    read -p "请输入序号选择功能: " choice
-    case "$choice" in
-        1) install_mtp ;;
-        2) view_link ;;
-        3) modify_config ;;
-        4) start_service_manual ;;
-        5) stop_service_manual ;;
-        6) restart_service_manual ;;
-        7) view_logs ;;
-        8) uninstall_mtp ;;
-        9) update_script ;;
-        0) clear; exit 0 ;;
-        00) [ -f "/usr/local/bin/n" ] && exec /usr/local/bin/n || { echo -e "${RED}未安装主控！${RESET}"; sleep 2; } ;;
-        *) echo -e "${RED}输入错误！${RESET}"; sleep 1 ;;
-    esac
-done
-EOFMTP
-
-chmod +x /usr/local/bin/mtp
-echo -e "${GREEN}✅ v1.2.3 已安装完成！${RESET}"
-echo -e "现在执行 ${CYAN}mtp${RESET} 进入面板，选择 1 重装即可（端口不会再被占用）。"
+    [[ "$confirm_uninstall" != "y" && "$confirm_uninstall" != "
