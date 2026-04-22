@@ -12,6 +12,7 @@ SCRIPT_VERSION="v1.0.1"
 CONF_FILE="/etc/danted.conf"
 INFO_FILE="/etc/s5_info.txt"
 SERVICE_NAME="danted"
+SCRIPT_URL="https://raw.githubusercontent.com/lijboys/SSHTools/main/s5.sh"
 
 pause() { read -p "按回车返回..." ; }
 
@@ -260,8 +261,34 @@ uninstall_s5() {
     yum remove -y dante-server >/dev/null 2>&1
   fi
 
-  rm -f "$CONF_FILE" "$INFO_FILE" /var/log/danted.log
+  rm -f "$CONF_FILE" "$INFO_FILE" /var/log/danted.log /usr/local/bin/s5
   echo -e "${GREEN}✅ 已卸载${RESET}"
+  pause
+}
+
+update_script() {
+  clear
+  echo -e "${YELLOW}正在从 GitHub 拉取最新脚本...${RESET}"
+  local tmp_file
+  tmp_file=$(mktemp)
+  if curl -fsSL --connect-timeout 10 "${SCRIPT_URL}" -o "$tmp_file" 2>/dev/null; then
+    sed -i 's/\r$//' "$tmp_file"
+    if bash -n "$tmp_file" 2>/dev/null; then
+      mv "$tmp_file" /usr/local/bin/s5
+      chmod +x /usr/local/bin/s5
+      echo -e "${GREEN}✅ 脚本更新完成！请重新输入 s5 启动最新版。${RESET}"
+      sleep 2
+      exit 0
+    else
+      rm -f "$tmp_file"
+      echo -e "${RED}❌ 新脚本语法校验失败，已取消更新！${RESET}"
+      sleep 2
+    fi
+  else
+    rm -f "$tmp_file"
+    echo -e "${RED}❌ 下载失败，请检查网络！${RESET}"
+    sleep 2
+  fi
   pause
 }
 
@@ -282,7 +309,8 @@ while true; do
   echo -e "  ${YELLOW}5.${RESET} 停止服务"
   echo -e "  ${CYAN}6.${RESET} 重启服务"
   echo -e "  ${CYAN}7.${RESET} 查看日志"
-  echo -e "  ${RED}8.${RESET} 卸载 SOCKS5"
+  echo -e "  ${BLUE}8.${RESET} 更新脚本 (从 GitHub 同步)"
+  echo -e "  ${RED}9.${RESET} 卸载 SOCKS5"
   echo -e "  ${GREEN}0.${RESET} 退出"
   echo -e "${CYAN}====================================${RESET}"
   read -p "请输入选择: " c
@@ -295,7 +323,8 @@ while true; do
     5) service_ctl stop ;;
     6) service_ctl restart ;;
     7) view_logs ;;
-    8) uninstall_s5 ;;
+    8) update_script ;;
+    9) uninstall_s5 ;;
     0) clear; exit 0 ;;
     *) echo -e "${RED}输入错误${RESET}"; sleep 1 ;;
   esac
