@@ -8,7 +8,7 @@ CYAN="\033[36m"
 BLUE="\033[34m"
 RESET="\033[0m"
 
-SCRIPT_VERSION="v1.2.0"
+SCRIPT_VERSION="v1.2.1"
 
 CONF_FILE="/etc/danted.conf"
 INFO_FILE="/etc/s5_info.txt"
@@ -49,20 +49,48 @@ detect_iface() {
 }
 
 get_status() {
-  systemctl is-active --quiet ${SERVICE_NAME} && echo -e "${GREEN}运行中${RESET}" || echo -e "${RED}已停止${RESET}"
+  if command -v rc-service >/dev/null 2>&1; then
+    rc-service ${SERVICE_NAME} status >/dev/null 2>&1 && echo -e "${GREEN}运行中${RESET}" || echo -e "${RED}已停止${RESET}"
+  else
+    systemctl is-active --quiet ${SERVICE_NAME} && echo -e "${GREEN}运行中${RESET}" || echo -e "${RED}已停止${RESET}"
+  fi
+}
+
+detect_pkg_manager() {
+  if command -v apk >/dev/null 2>&1; then
+    echo "apk"
+  elif command -v apt >/dev/null 2>&1; then
+    echo "apt"
+  elif command -v dnf >/dev/null 2>&1; then
+    echo "dnf"
+  elif command -v yum >/dev/null 2>&1; then
+    echo "yum"
+  else
+    echo "unknown"
+  fi
 }
 
 install_deps() {
-  if command -v apt >/dev/null 2>&1; then
-    apt update -y && apt install -y dante-server >/dev/null 2>&1
-  elif command -v dnf >/dev/null 2>&1; then
-    dnf install -y dante-server >/dev/null 2>&1
-  elif command -v yum >/dev/null 2>&1; then
-    yum install -y dante-server >/dev/null 2>&1
-  else
-    echo -e "${RED}❌ 不支持的系统包管理器${RESET}"
-    return 1
-  fi
+  local pkg_mgr=$(detect_pkg_manager)
+  
+  case "$pkg_mgr" in
+    apk)
+      apk add --no-cache dante-server curl >/dev/null 2>&1
+      ;;
+    apt)
+      apt update -y && apt install -y dante-server >/dev/null 2>&1
+      ;;
+    dnf)
+      dnf install -y dante-server >/dev/null 2>&1
+      ;;
+    yum)
+      yum install -y dante-server >/dev/null 2>&1
+      ;;
+    *)
+      echo -e "${RED}❌ 不支持的系统包管理器${RESET}"
+      return 1
+      ;;
+  esac
 }
 
 write_conf() {
@@ -121,9 +149,12 @@ read_info() {
 }
 
 stop_service() {
-  systemctl stop ${SERVICE_NAME} >/dev/null 2>&1
+  if command -v rc-service >/dev/null 2>&1; then
+    rc-service ${SERVICE_NAME} stop >/dev/null 2>&1
+  else
+    systemctl stop ${SERVICE_NAME} >/dev/null 2>&1
+  fi
   sleep 1
-  # 等待端口释放
   if [ -f "$CONF_FILE" ]; then
     local port=$(grep -o 'port = [0-9]*' "$CONF_FILE" | awk '{print $3}')
     for i in {1..5}; do
@@ -136,10 +167,19 @@ stop_service() {
 }
 
 start_service() {
-  systemctl enable ${SERVICE_NAME} >/dev/null 2>&1
-  systemctl restart ${SERVICE_NAME}
+  if command -v rc-service >/dev/null 2>&1; then
+    rc-update add ${SERVICE_NAME} >/dev/null 2>&1
+    rc-service ${SERVICE_NAME} restart >/dev/null 2>&1
+  else
+    systemctl enable ${SERVICE_NAME} >/dev/null 2>&1
+    systemctl restart ${SERVICE_NAME} >/dev/null 2>&1
+  fi
   sleep 1
-  systemctl is-active --quiet ${SERVICE_NAME}
+  if command -v rc-service >/dev/null 2>&1; then
+    rc-service ${SERVICE_NAME} status >/dev/null 2>&1
+  else
+    systemctl is-active --quiet ${SERVICE_NAME}
+  fi
 }
 
 install_s5() {
@@ -297,7 +337,11 @@ modify_s5() {
 
 service_ctl() {
   local action="$1"
-  systemctl ${action} ${SERVICE_NAME}
+  if command -v rc-service >/dev/null 2>&1; then
+    rc-service ${SERVICE_NAME} $action
+  else
+    systemctl ${action} ${SERVICE_NAME}
+  fi
   sleep 1
   echo -e "当前状态: $(get_status)"
   pause
@@ -308,7 +352,11 @@ view_logs() {
   echo -e "${CYAN}=========================================${RESET}"
   echo -e "               📜 SOCKS5 运行日志"
   echo -e "${CYAN}=========================================${RESET}"
-  journalctl -u ${SERVICE_NAME} --no-pager -n 50 2>/dev/null || tail -n 50 "$LOG_FILE" 2>/dev/null || echo "暂无日志"
+  if command -v journalctl >/dev/null 2>&1; then
+    journalctl -u ${SERVICE_NAME} --no-pager -n 50 2>/dev/null || tail -n 50 "$LOG_FILE" 2>/dev/null || echo "暂无日志"
+  else
+    tail -n 50 "$LOG_FILE" 2>/dev/null || echo "暂无日志"
+  fi
   echo -e "${CYAN}=========================================${RESET}"
   pause
 }
@@ -320,16 +368,23 @@ uninstall_s5() {
   [[ "$confirm_uninstall" != "y" && "$confirm_uninstall" != "Y" ]] && { echo -e "${YELLOW}已取消卸载。${RESET}"; sleep 1; return; }
   
   echo -e "${RED}正在卸载...${RESET}"
-  systemctl stop ${SERVICE_NAME} >/dev/null 2>&1
-  systemctl disable ${SERVICE_NAME} >/dev/null 2>&1
+  stop_service
 
-  if command -v apt >/dev/null 2>&1; then
-    apt remove -y dante-server >/dev/null 2>&1
-  elif command -v dnf >/dev/null 2>&1; then
-    dnf remove -y dante-server >/dev/null 2>&1
-  elif command -v yum >/dev/null 2>&1; then
-    yum remove -y dante-server >/dev/null 2>&1
-  fi
+  local pkg_mgr=$(detect_pkg_manager)
+  case "$pkg_mgr" in
+    apk)
+      apk del dante-server >/dev/null 2>&1
+      ;;
+    apt)
+      apt remove -y dante-server >/dev/null 2>&1
+      ;;
+    dnf)
+      dnf remove -y dante-server >/dev/null 2>&1
+      ;;
+    yum)
+      yum remove -y dante-server >/dev/null 2>&1
+      ;;
+  esac
 
   rm -f "$CONF_FILE" "$INFO_FILE" "$LOG_FILE" /usr/local/bin/s5
   echo -e "${GREEN}✅ 卸载完成！${RESET}"
@@ -418,4 +473,4 @@ done
 EOF
 
 chmod +x /usr/local/bin/s5
-echo -e "${GREEN}✅ s5 v1.2.0 已更新完成！${RESET}"
+echo -e "${GREEN}✅ s5 已更新，支持 Alpine 系统！${RESET}"
