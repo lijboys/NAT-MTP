@@ -280,19 +280,11 @@ choose_and_generate_secret() {
 choose_ip_mode() {
     echo ""
     echo -e "${CYAN}--- 请选择对外使用的 IP 类型 ---${RESET}"
-    echo -e "  ${GREEN}1.${RESET} IPv4"
+    echo -e "  ${GREEN}1.${RESET} IPv4 ${YELLOW}(默认)${RESET}"
     echo -e "  ${GREEN}2.${RESET} IPv6"
-    read -p "请输入序号 (回车默认 2): " ip_choice
+    read -p "请输入序号 (回车默认 1): " ip_choice
 
-    if [ -z "$ip_choice" ] || [ "$ip_choice" = "2" ]; then
-        IP_TYPE="6"
-        AUTO_IP=$(get_public_ip 6)
-        DISPLAY_IP=${AUTO_IP:-"获取失败，请手动输入"}
-        BIND_ADDR="[::]:${IN_PORT}"
-        read -p "👉 请输入公网 IPv6 地址 (识别出: $DISPLAY_IP): " PUBLIC_IP
-        PUBLIC_IP=${PUBLIC_IP:-$AUTO_IP}
-        is_valid_ipv6 "$PUBLIC_IP" || { echo -e "${RED}❌ 公网 IPv6 地址无效！${RESET}"; return 1; }
-    elif [ "$ip_choice" = "1" ]; then
+    if [ -z "$ip_choice" ] || [ "$ip_choice" = "1" ]; then
         IP_TYPE="4"
         AUTO_IP=$(get_public_ip 4)
         DISPLAY_IP=${AUTO_IP:-"获取失败，请手动输入"}
@@ -300,6 +292,14 @@ choose_ip_mode() {
         read -p "👉 请输入公网 IPv4 地址 (识别出: $DISPLAY_IP): " PUBLIC_IP
         PUBLIC_IP=${PUBLIC_IP:-$AUTO_IP}
         is_valid_ipv4 "$PUBLIC_IP" || { echo -e "${RED}❌ 公网 IPv4 地址无效！${RESET}"; return 1; }
+    elif [ "$ip_choice" = "2" ]; then
+        IP_TYPE="6"
+        AUTO_IP=$(get_public_ip 6)
+        DISPLAY_IP=${AUTO_IP:-"获取失败，请手动输入"}
+        BIND_ADDR="[::]:${IN_PORT}"
+        read -p "👉 请输入公网 IPv6 地址 (识别出: $DISPLAY_IP): " PUBLIC_IP
+        PUBLIC_IP=${PUBLIC_IP:-$AUTO_IP}
+        is_valid_ipv6 "$PUBLIC_IP" || { echo -e "${RED}❌ 公网 IPv6 地址无效！${RESET}"; return 1; }
     else
         echo -e "${RED}❌ 输入错误！${RESET}"
         return 1
