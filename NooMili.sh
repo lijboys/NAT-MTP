@@ -3,7 +3,7 @@ cat > /usr/local/bin/n <<'EOF'
 
 # ============================================
 # SSHTools 工具箱 - NAT/VPS 多功能管理面板
-# Version: v2.2.6 (IPv6 支持版)
+# Version: v2.2.7
 # ============================================
 
 GREEN="\033[32m"
@@ -13,15 +13,13 @@ CYAN="\033[36m"
 BLUE="\033[34m"
 RESET="\033[0m"
 
-SCRIPT_VERSION="v2.2.6"
+SCRIPT_VERSION="v2.2.7"
 
-# GitHub Raw 链接
 NAT_URL="https://raw.githubusercontent.com/lijboys/SSHTools/refs/heads/main/NooMili.sh"
 MTP_URL="https://raw.githubusercontent.com/lijboys/SSHTools/refs/heads/main/mtp.sh"
 KOMARI_URL="https://raw.githubusercontent.com/lijboys/SSHTools/refs/heads/main/komari.sh"
 SOCKS5_URL="https://raw.githubusercontent.com/lijboys/SSHTools/refs/heads/main/s5.sh"
 
-# 数据文件
 IP_FILE="/etc/.noomili_ip"
 IP_TYPE_FILE="/etc/.noomili_ip_type"
 PORTS_FILE="/etc/.noomili_ports"
@@ -122,34 +120,34 @@ show_sys_info() {
     [ -z "$LOCAL_IP" ] && LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
     [ -z "$LOCAL_IP" ] && LOCAL_IP="未分配"
 
+    AUTO_IPV4=$(get_public_ip 4)
+    AUTO_IPV6=$(get_public_ip 6)
+
     if [ -f "$IP_FILE" ]; then
         SAVED_IP=$(cat "$IP_FILE")
         SAVED_TYPE=$(cat "$IP_TYPE_FILE" 2>/dev/null || echo "4")
-        if [ "$SAVED_TYPE" = "6" ]; then
-            IPV4="${RED}未配置${RESET}"
-            IPV6="${GREEN}${SAVED_IP}${RESET} ${YELLOW}(已手动校准)${RESET}"
-        else
-            IPV4="${GREEN}${SAVED_IP}${RESET} ${YELLOW}(已手动校准)${RESET}"
-            IPV6_RAW=$(get_public_ip 6)
-            if [[ "$IPV6_RAW" =~ ^[0-9a-fA-F:]+:[0-9a-fA-F:]+ ]]; then
-                IPV6="$IPV6_RAW"
-            else
-                IPV6="未分配或无 IPv6"
-            fi
-        fi
     else
-        IPV4_RAW=$(get_public_ip 4)
-        if [[ "$IPV4_RAW" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            IPV4="$IPV4_RAW ${RED}(出网IP)${RESET}"
-        else
-            IPV4="${RED}获取失败${RESET}"
-        fi
+        SAVED_IP=""
+        SAVED_TYPE=""
+    fi
 
-        IPV6_RAW=$(get_public_ip 6)
-        if [[ "$IPV6_RAW" =~ ^[0-9a-fA-F:]+:[0-9a-fA-F:]+ ]]; then
-            IPV6="$IPV6_RAW"
+    if [ -n "$AUTO_IPV4" ]; then
+        DISPLAY_IPV4="$AUTO_IPV4 ${RED}(自动识别)${RESET}"
+    else
+        DISPLAY_IPV4="${RED}获取失败${RESET}"
+    fi
+
+    if [ -n "$AUTO_IPV6" ]; then
+        DISPLAY_IPV6="$AUTO_IPV6 ${RED}(自动识别)${RESET}"
+    else
+        DISPLAY_IPV6="未分配或无 IPv6"
+    fi
+
+    if [ -n "$SAVED_IP" ]; then
+        if [ "$SAVED_TYPE" = "6" ]; then
+            DISPLAY_IPV6="${GREEN}${SAVED_IP}${RESET} ${YELLOW}(手动校准)${RESET}"
         else
-            IPV6="未分配或无 IPv6"
+            DISPLAY_IPV4="${GREEN}${SAVED_IP}${RESET} ${YELLOW}(手动校准)${RESET}"
         fi
     fi
 
@@ -186,12 +184,14 @@ show_sys_info() {
     echo -e " 💽 ${GREEN}硬盘空间:${RESET}  ${YELLOW}${DISK_USED}${RESET} / ${DISK_TOTAL} (${DISK_PERCENT})"
     echo -e "${CYAN}----------------------------------------------------${RESET}"
     echo -e " 🌐 ${GREEN}内网 IPv4:${RESET} ${LOCAL_IP}"
-    echo -e " 🌍 ${GREEN}公网 IPv4:${RESET} $IPV4"
-    echo -e " 🌍 ${GREEN}公网 IPv6:${RESET} ${YELLOW}${IPV6}${RESET}"
+    echo -e " 🌍 ${GREEN}公网 IPv4:${RESET} ${DISPLAY_IPV4}"
+    echo -e " 🌍 ${GREEN}公网 IPv6:${RESET} ${YELLOW}${DISPLAY_IPV6}${RESET}"
     echo -e " 🔌 ${GREEN}NAT 端口:${RESET}  ${NAT_PORTS}"
     if [ -n "$TRAFFIC_INFO" ]; then
         echo -e " 📊 ${GREEN}流量统计:${RESET}  $TRAFFIC_INFO ${YELLOW}(自开机)${RESET}"
     fi
+    echo -e "${CYAN}----------------------------------------------------${RESET}"
+    echo -e "${YELLOW}提示: 自动识别 IP 不一定等于商家面板里的实际映射入口 IP${RESET}"
     echo -e "${CYAN}====================================================${RESET}"
     echo -e "${YELLOW}操作: [回车]返回 [c]校准IP [p]设置端口 [d]恢复自动${RESET}"
     read -p "请输入选择: " sub_choice
@@ -262,20 +262,16 @@ update_system() {
     echo -e "${CYAN}=========================================${RESET}"
 
     if command -v apt-get >/dev/null 2>&1; then
-        echo -e "${YELLOW}检测到 Debian/Ubuntu，使用 APT 更新...${RESET}"
         export DEBIAN_FRONTEND=noninteractive
         apt-get update -y
         apt-get upgrade -y
     elif command -v dnf >/dev/null 2>&1; then
-        echo -e "${YELLOW}检测到新版 RHEL 系统，使用 DNF 更新...${RESET}"
         dnf makecache
         dnf update -y
     elif command -v yum >/dev/null 2>&1; then
-        echo -e "${YELLOW}检测到 CentOS/RHEL，使用 YUM 更新...${RESET}"
         yum makecache
         yum update -y
     elif command -v apk >/dev/null 2>&1; then
-        echo -e "${YELLOW}检测到 Alpine，使用 APK 更新...${RESET}"
         apk update && apk upgrade
     else
         echo -e "${RED}未知的包管理器！请手动执行更新。${RESET}"
@@ -294,12 +290,10 @@ clean_system() {
 
     SPACE_BEFORE=$(df / | tail -n 1 | awk '{print $3}')
 
-    echo -e "${YELLOW}[1/3] 清理 systemd 冗余日志...${RESET}"
     if command -v journalctl >/dev/null 2>&1; then
         journalctl --vacuum-size=50M >/dev/null 2>&1
     fi
 
-    echo -e "${YELLOW}[2/3] 清理软件包缓存与孤儿依赖...${RESET}"
     if command -v apt-get >/dev/null 2>&1; then
         export DEBIAN_FRONTEND=noninteractive
         apt-get autoremove -y >/dev/null 2>&1
@@ -312,7 +306,6 @@ clean_system() {
         yum clean all >/dev/null 2>&1
     fi
 
-    echo -e "${YELLOW}[3/3] 清空临时文件残余...${RESET}"
     rm -rf /tmp/* /var/tmp/* >/dev/null 2>&1
 
     SPACE_AFTER=$(df / | tail -n 1 | awk '{print $3}')
@@ -355,9 +348,9 @@ nat_info_card() {
     echo -e " 📛 ${GREEN}主机名:${RESET}    $HOSTNAME_INFO"
     if [ -f "$IP_FILE" ]; then
         if [ "$CARD_TYPE" = "6" ]; then
-            echo -e " 🌍 ${GREEN}IPv6:${RESET}      $CARD_IP"
+            echo -e " 🌍 ${GREEN}校准IPv6:${RESET}  $CARD_IP"
         else
-            echo -e " 🌍 ${GREEN}IPv4:${RESET}      $CARD_IP"
+            echo -e " 🌍 ${GREEN}校准IPv4:${RESET}  $CARD_IP"
         fi
     else
         echo -e " 🌍 ${GREEN}IPv4:${RESET}      $CARD_IPV4"
@@ -582,3 +575,4 @@ done
 EOF
 
 chmod +x /usr/local/bin/n
+echo -e "\033[32m✅ 主控脚本已更新：默认思路回归 IPv4，同时保留 IPv6 校准能力。\033[0m"
