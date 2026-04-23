@@ -15,6 +15,10 @@ MTP_URL="https://raw.githubusercontent.com/lijboys/SSHTools/refs/heads/main/mtp.
 KOMARI_URL="https://raw.githubusercontent.com/lijboys/SSHTools/refs/heads/main/komari.sh"
 SOCKS5_URL="https://raw.githubusercontent.com/lijboys/SSHTools/refs/heads/main/s5.sh"
 
+# 第三方脚本
+LAOWANG_URL="https://raw.githubusercontent.com/laowaang/Shell/main/install.sh"
+KEJI_LION_URL="https://raw.githubusercontent.com/kejilion/sh/main/kejilion.sh"
+
 IP_FILE="/etc/.noomili_ip"
 PORTS_FILE="/etc/.noomili_ports"
 
@@ -390,6 +394,38 @@ launch_lucky() {
     pause
 }
 
+launch_laowang() {
+    clear
+    echo -e "${CYAN}=========================================${RESET}"
+    echo -e "        🔧 老王一键工具箱"
+    echo -e "${CYAN}=========================================${RESET}"
+    echo -e "${RED}⚠️ 来自第三方，请确认你信任该来源！${RESET}"
+    read -p "确认继续吗？[Y/n]: " confirm
+    if [[ -z "$confirm" || "$confirm" == "y" || "$confirm" == "Y" ]]; then
+        echo -e "${YELLOW}正在调用老王一键工具箱...${RESET}"
+        bash <(curl -fsSL "${LAOWANG_URL}")
+    else
+        echo -e "${YELLOW}已取消。${RESET}"
+        pause
+    fi
+}
+
+launch_keji_lion() {
+    clear
+    echo -e "${CYAN}=========================================${RESET}"
+    echo -e "        🚀 科技lion一键脚本"
+    echo -e "${CYAN}=========================================${RESET}"
+    echo -e "${RED}⚠️ 来自第三方，请确认你信任该来源！${RESET}"
+    read -p "确认继续吗？[Y/n]: " confirm
+    if [[ -z "$confirm" || "$confirm" == "y" || "$confirm" == "Y" ]]; then
+        echo -e "${YELLOW}正在调用科技lion一键脚本...${RESET}"
+        bash <(curl -fsSL "${KEJI_LION_URL}")
+    else
+        echo -e "${YELLOW}已取消。${RESET}"
+        pause
+    fi
+}
+
 update_nat() {
     clear
     echo -e "${YELLOW}正在从 GitHub 拉取最新主控代码...${RESET}"
@@ -497,9 +533,13 @@ while true; do
     echo -e "  ${GREEN}7.${RESET} 进入 SOCKS5 管理面板"
     echo -e "  ${GREEN}8.${RESET} 🛡️ 安装 SSL 面板 (Lucky)"
     echo -e "${CYAN}-----------------------------------------${RESET}"
-    echo -e "  ${YELLOW}u.${RESET} 更新主控脚本"
+    echo -e "  ${YELLOW}9.${RESET} 老王一键工具箱"
+    echo -e "  ${YELLOW}10.${RESET} 科技lion一键脚本"
+    echo -e "${CYAN}-----------------------------------------${RESET}"
+    echo -e "  ${CYAN}u.${RESET} 更新主控脚本"
     echo -e "  ${RED}x.${RESET} 卸载工具箱"
     echo -e "  ${GREEN}0.${RESET} 退出"
+    echo -e "${CYAN}========================================
     echo -e "${CYAN}=========================================${RESET}"
     
     read -p "请输入选择: " choice
@@ -513,6 +553,8 @@ while true; do
         6) launch_komari ;;
         7) launch_s5 ;;
         8) launch_lucky ;;
+        9) launch_laowang ;;
+        10) launch_keji_lion ;;
         u|U) update_nat ;;
         x|X) uninstall_nat ;;
         0) exit 0 ;;
@@ -522,4 +564,9 @@ done
 EOF
 
 chmod +x /usr/local/bin/n
-echo -e "${GREEN}✅ 主控脚本已修复！${RESET}"
+echo -e "${GREEN}✅ 主控脚本安装完成！${RESET}"
+echo -e "${CYAN}=========================================${RESET}"
+echo -e "快速启动命令: ${YELLOW}n${RESET}"
+echo -e "${CYAN}=========================================${RESET}"
+
+/usr/local/bin/n
