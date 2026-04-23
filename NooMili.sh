@@ -2,7 +2,7 @@
 
 # ============================================
 # SSHTools 工具箱 - NAT/VPS 多功能管理面板
-# Version: v2.2.5
+# Version: v2.2.6 (IPv6 支持版)
 # ============================================
 
 GREEN="\033[32m"
@@ -12,7 +12,7 @@ CYAN="\033[36m"
 BLUE="\033[34m"
 RESET="\033[0m"
 
-SCRIPT_VERSION="v2.2.5"
+SCRIPT_VERSION="v2.2.6"
 
 # GitHub Raw 链接
 NAT_URL="https://raw.githubusercontent.com/lijboys/SSHTools/refs/heads/main/NooMili.sh"
@@ -22,42 +22,46 @@ SOCKS5_URL="https://raw.githubusercontent.com/lijboys/SSHTools/refs/heads/main/s
 
 # 数据文件
 IP_FILE="/etc/.noomili_ip"
+IP_TYPE_FILE="/etc/.noomili_ip_type"
 PORTS_FILE="/etc/.noomili_ports"
 
-# Root 检查
 if [ "$EUID" -ne 0 ]; then
     echo -e "${RED}请使用 root 用户运行！${RESET}"
     exit 1
 fi
 
-# ================= 通用函数 =================
-
 pause() {
     read -p "按回车键返回主菜单..."
 }
 
-# 通用公网IP获取（带超时和多源）
 get_public_ip() {
-    local ip_type=$1  # 4 或 6
+    local ip_type=$1
     local sources=()
-    if [ "$ip_type" = "4" ]; then
-        sources=("ipv4.icanhazip.com" "api.ipify.org" "ifconfig.me")
-    else
-        sources=("ipv6.icanhazip.com" "api6.ipify.org" "ifconfig.co")
-    fi
     
-    for src in "${sources[@]}"; do
-        local result
-        result=$(curl -s${ip_type}m3 --connect-timeout 3 "$src" 2>/dev/null)
-        if [ -n "$result" ]; then
-            echo "$result"
-            return 0
-        fi
-    done
+    if [ "$ip_type" = "6" ]; then
+        sources=("ipv6.icanhazip.com" "api6.ipify.org" "ifconfig.co")
+        for src in "${sources[@]}"; do
+            local result
+            result=$(curl -s6m3 --connect-timeout 3 "$src" 2>/dev/null)
+            if [ -n "$result" ] && [[ "$result" =~ ^[0-9a-fA-F:]+$ ]]; then
+                echo "$result"
+                return 0
+            fi
+        done
+    else
+        sources=("ipv4.icanhazip.com" "api.ipify.org" "ifconfig.me")
+        for src in "${sources[@]}"; do
+            local result
+            result=$(curl -s4m3 --connect-timeout 3 "$src" 2>/dev/null)
+            if [ -n "$result" ] && [[ "$result" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                echo "$result"
+                return 0
+            fi
+        done
+    fi
     return 1
 }
 
-# 安装主控快捷键 n
 install_shortcut() {
     if [ ! -f "/usr/local/bin/n" ]; then
         if curl -fsSL --connect-timeout 10 "${NAT_URL}" -o /usr/local/bin/n 2>/dev/null; then
@@ -68,8 +72,6 @@ install_shortcut() {
     fi
 }
 install_shortcut
-
-# ================= 系统基础功能 =================
 
 show_sys_info() {
     clear
@@ -120,7 +122,20 @@ show_sys_info() {
     [ -z "$LOCAL_IP" ] && LOCAL_IP="未分配"
     
     if [ -f "$IP_FILE" ]; then
-        IPV4="${GREEN}$(cat "$IP_FILE")${RESET} ${YELLOW}(已手动校准)${RESET}"
+        SAVED_IP=$(cat "$IP_FILE")
+        SAVED_TYPE=$(cat "$IP_TYPE_FILE" 2>/dev/null || echo "4")
+        if [ "$SAVED_TYPE" = "6" ]; then
+            IPV4="${RED}未配置${RESET}"
+            IPV6="${GREEN}${SAVED_IP}${RESET} ${YELLOW}(已手动校准)${RESET}"
+        else
+            IPV4="${GREEN}${SAVED_IP}${RESET} ${YELLOW}(已手动校准)${RESET}"
+            IPV6_RAW=$(get_public_ip 6)
+            if [[ "$IPV6_RAW" =~ ^[0-9a-fA-F:]+:[0-9a-fA-F:]+ ]]; then
+                IPV6="$IPV6_RAW"
+            else
+                IPV6="未分配或无 IPv6"
+            fi
+        fi
     else
         IPV4_RAW=$(get_public_ip 4)
         if [[ "$IPV4_RAW" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -128,13 +143,13 @@ show_sys_info() {
         else
             IPV4="${RED}获取失败${RESET}"
         fi
-    fi
-    
-    IPV6_RAW=$(get_public_ip 6)
-    if [[ "$IPV6_RAW" =~ ^[0-9a-fA-F:]+:[0-9a-fA-F:]+ ]]; then
-        IPV6="$IPV6_RAW"
-    else
-        IPV6="未分配或无 IPv6"
+        
+        IPV6_RAW=$(get_public_ip 6)
+        if [[ "$IPV6_RAW" =~ ^[0-9a-fA-F:]+:[0-9a-fA-F:]+ ]]; then
+            IPV6="$IPV6_RAW"
+        else
+            IPV6="未分配或无 IPv6"
+        fi
     fi
     
     if [ -f "$PORTS_FILE" ]; then
@@ -183,16 +198,37 @@ show_sys_info() {
     case "$sub_choice" in
         c|C)
             echo ""
-            read -p "👉 请输入控制面板看到的真实 IPv4: " user_ip
-            if [[ "$user_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-                echo "$user_ip" > "$IP_FILE"
-                echo -e "${GREEN}✅ IP 校准成功！已永久保存。${RESET}"
-                sleep 1
-                show_sys_info
+            echo -e "${CYAN}--- IP 类型选择 ---${RESET}"
+            echo -e "  ${GREEN}1.${RESET} IPv4"
+            echo -e "  ${GREEN}2.${RESET} IPv6"
+            read -p "请选择 (回车默认 1): " ip_choice
+            
+            if [ "$ip_choice" = "2" ]; then
+                read -p "👉 请输入控制面板看到的真实 IPv6: " user_ip
+                if [[ "$user_ip" =~ ^[0-9a-fA-F:]+$ ]]; then
+                    echo "$user_ip" > "$IP_FILE"
+                    echo "6" > "$IP_TYPE_FILE"
+                    echo -e "${GREEN}✅ IPv6 校准成功！已永久保存。${RESET}"
+                    sleep 1
+                    show_sys_info
+                else
+                    echo -e "${RED}❌ 格式错误！${RESET}"
+                    sleep 2
+                    show_sys_info
+                fi
             else
-                echo -e "${RED}❌ 格式错误！${RESET}"
-                sleep 2
-                show_sys_info
+                read -p "👉 请输入控制面板看到的真实 IPv4: " user_ip
+                if [[ "$user_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                    echo "$user_ip" > "$IP_FILE"
+                    echo "4" > "$IP_TYPE_FILE"
+                    echo -e "${GREEN}✅ IPv4 校准成功！已永久保存。${RESET}"
+                    sleep 1
+                    show_sys_info
+                else
+                    echo -e "${RED}❌ 格式错误！${RESET}"
+                    sleep 2
+                    show_sys_info
+                fi
             fi
             ;;
         p|P)
@@ -210,7 +246,7 @@ show_sys_info() {
             fi
             ;;
         d|D)
-            rm -f "$IP_FILE"
+            rm -f "$IP_FILE" "$IP_TYPE_FILE"
             echo -e "${YELLOW}已恢复自动获取 IP。${RESET}"
             sleep 1
             show_sys_info
@@ -291,8 +327,6 @@ clean_system() {
     pause
 }
 
-# ================= NAT 信息卡 =================
-
 nat_info_card() {
     clear
     echo -e "${CYAN}====================================================${RESET}"
@@ -300,14 +334,14 @@ nat_info_card() {
     echo -e "${CYAN}====================================================${RESET}"
     
     if [ -f "$IP_FILE" ]; then
-        CARD_IPV4=$(cat "$IP_FILE")
+        CARD_IP=$(cat "$IP_FILE")
+        CARD_TYPE=$(cat "$IP_TYPE_FILE" 2>/dev/null || echo "4")
     else
         CARD_IPV4=$(get_public_ip 4)
+        CARD_IPV6=$(get_public_ip 6)
         [ -z "$CARD_IPV4" ] && CARD_IPV4="N/A"
+        [ -z "$CARD_IPV6" ] && CARD_IPV6="N/A"
     fi
-    
-    CARD_IPV6=$(get_public_ip 6)
-    [ -z "$CARD_IPV6" ] && CARD_IPV6="N/A"
     
     if [ -f "$PORTS_FILE" ]; then
         CARD_PORTS=$(cat "$PORTS_FILE")
@@ -318,8 +352,16 @@ nat_info_card() {
     HOSTNAME_INFO=$(hostname)
     
     echo -e " 📛 ${GREEN}主机名:${RESET}    $HOSTNAME_INFO"
-    echo -e " 🌍 ${GREEN}IPv4:${RESET}      $CARD_IPV4"
-    echo -e " 🌍 ${GREEN}IPv6:${RESET}      $CARD_IPV6"
+    if [ -f "$IP_FILE" ]; then
+        if [ "$CARD_TYPE" = "6" ]; then
+            echo -e " 🌍 ${GREEN}IPv6:${RESET}      $CARD_IP"
+        else
+            echo -e " 🌍 ${GREEN}IPv4:${RESET}      $CARD_IP"
+        fi
+    else
+        echo -e " 🌍 ${GREEN}IPv4:${RESET}      $CARD_IPV4"
+        echo -e " 🌍 ${GREEN}IPv6:${RESET}      $CARD_IPV6"
+    fi
     echo -e " 🔌 ${GREEN}端口范围:${RESET}  $CARD_PORTS"
     echo -e "${CYAN}----------------------------------------------------${RESET}"
     echo -e "${YELLOW} 常用端口占用检测:${RESET}"
@@ -334,18 +376,8 @@ nat_info_card() {
     done
     
     echo -e "${CYAN}====================================================${RESET}"
-    echo -e "${YELLOW} 一键复制格式（可粘贴到笔记）:${RESET}"
-    echo ""
-    echo "  主机: $HOSTNAME_INFO"
-    echo "  IPv4: $CARD_IPV4"
-    echo "  IPv6: $CARD_IPV6"
-    echo "  端口: $CARD_PORTS"
-    echo ""
-    echo -e "${CYAN}====================================================${RESET}"
     pause
 }
-
-# ================= 业务与外部脚本 =================
 
 launch_mtp() {
     if [ ! -f "/usr/local/bin/mtp" ]; then
@@ -413,7 +445,6 @@ launch_lucky() {
     pause
 }
 
-# 第三方外部脚本 → 默认 Y（直接回车就执行）
 run_external() {
     local name=$1
     local cmd=$2
@@ -486,12 +517,12 @@ uninstall_nat() {
                 rm -f /etc/danted.conf /etc/s5_info.txt /usr/local/bin/s5 /var/log/danted.log
             fi
             echo -e "${YELLOW}提示: 如果安装了 Lucky，请输入 lucky_uninstall 卸载。${RESET}"
-            rm -f /usr/local/bin/n "$IP_FILE" "$PORTS_FILE"
+            rm -f /usr/local/bin/n "$IP_FILE" "$IP_TYPE_FILE" "$PORTS_FILE"
             echo -e "${GREEN}✅ 全部组件已卸载！再见！${RESET}"
             exit 0
             ;;
         2)
-            rm -f /usr/local/bin/n "$IP_FILE" "$PORTS_FILE"
+            rm -f /usr/local/bin/n "$IP_FILE" "$IP_TYPE_FILE" "$PORTS_FILE"
             echo -e "${GREEN}✅ 主控面板已卸载！${RESET}"
             exit 0
             ;;
@@ -499,7 +530,6 @@ uninstall_nat() {
     esac
 }
 
-# ================= 主菜单 =================
 while true; do
     clear
     echo -e "${CYAN} _    _             __  __ _ _ _ ${RESET}"
